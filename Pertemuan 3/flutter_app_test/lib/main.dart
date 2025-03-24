@@ -21,14 +21,14 @@ class MainApp extends StatelessWidget {
 class HomePage extends StatelessWidget {
   HomePage({super.key});
 
-  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>(); // Add this
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>(); 
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      key: _scaffoldKey, // Assign GlobalKey here
-      appBar: ResponsiveAppBar(scaffoldKey: _scaffoldKey), // Pass scaffoldKey
-      endDrawer: NavigationDrawer(), // Drawer for mobile menu
+      key: _scaffoldKey,
+      appBar: ResponsiveAppBar(scaffoldKey: _scaffoldKey), 
+      endDrawer: NavigationDrawer(), 
       body: LayoutBuilder(
         builder: (context, constraints) {
           if (constraints.maxWidth > 800) {
@@ -74,7 +74,7 @@ class ResponsiveAppBar extends StatelessWidget implements PreferredSizeWidget {
     return IconButton(
       icon: const Icon(Icons.menu),
       onPressed: () {
-        scaffoldKey.currentState?.openEndDrawer(); // Open drawer using GlobalKey
+        scaffoldKey.currentState?.openEndDrawer(); 
       },
     );
   }
@@ -107,7 +107,6 @@ class NavigationDrawer extends StatelessWidget {
   }
 }
 
-// Wide Screen Layout
 class WideScreenLayout extends StatelessWidget {
   const WideScreenLayout({super.key});
 
@@ -142,7 +141,6 @@ class WideScreenLayout extends StatelessWidget {
   }
 }
 
-// Narrow Screen Layout
 class NarrowScreenLayout extends StatelessWidget {
   const NarrowScreenLayout({super.key});
 
