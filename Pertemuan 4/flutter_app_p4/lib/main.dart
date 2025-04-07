@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'add_product.dart';
+import 'delete_product.dart';
+import 'edit_product.dart';
+import 'home_screen.dart';
 
 void main() {
   runApp(const MainApp());
@@ -11,8 +15,8 @@ class MainApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const MaterialApp(
-      title: 'Produk API Demo',
+    return MaterialApp(
+      title: 'Flutter Laravel API',
       home: ProductListScreen(),
       debugShowCheckedModeBanner: false,
     );
@@ -27,66 +31,49 @@ class ProductListScreen extends StatefulWidget {
 }
 
 class _ProductListScreenState extends State<ProductListScreen> {
-  List products = [];
-  bool isLoading = true;
+  int _currentIndex = 0;
 
-  final String apiUrl = 'http://localhost:8000/api/products';
-
-  Future<void> fetchProducts() async {
-    try {
-      final response = await http.get(Uri.parse(apiUrl));
-      if (response.statusCode == 200) {
-        setState(() {
-          products = json.decode(response.body);
-          isLoading = false;
-        });
-      } else {
-        throw Exception('Gagal memuat data');
-      }
-    } catch (e) {
-      print ('Error: $e');
-      setState(() {
-        isLoading = false;
-      });
-    }
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    fetchProducts();
-  }
+  final List<Widget> _screens = [
+    HomeScreen(),
+    AddProductScreen(),
+    EditProductScreen(),
+    // DeleteProductScreen(),
+  ];
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Daftar Produk')),
-      body: isLoading
-        ? const Center(child: CircularProgressIndicator())
-        : ListView.builder(
-          itemCount: products.length,
-          itemBuilder: (context, index) {
-            final product = products[index];
-            String isPromo;   
-
-            if(product['is_promo'] == true) {
-              isPromo = 'Ada';
-            } else {
-              isPromo = 'Tidak';
-            }
-
-            return ListTile(
-              title: Text(product['name']),
-              subtitle: Column(
-                children: [
-                  Text('Harga: Rp${product['price']}'),
-                  Image.network(product['photo']),
-                  Text('Apakah ada promo: $isPromo'),
-                ]
-              )
-            );
-          },
-        ),
+      body: _screens[_currentIndex],
+      bottomNavigationBar: BottomNavigationBar(
+        type: BottomNavigationBarType.fixed,
+        items: const <BottomNavigationBarItem>[
+          BottomNavigationBarItem(
+            icon: Icon(Icons.home),
+            label: 'Home',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.add_circle_outline),
+            label: 'Add',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.edit),
+            label: 'Edit',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.delete_forever),
+            label: 'Delete',
+          ),
+        ],
+        currentIndex: _currentIndex,
+        selectedItemColor: Colors.blue,
+        unselectedItemColor: Colors.grey,
+        onTap: (index) {
+          setState(() {
+            _currentIndex = index; 
+          });
+        },
+      ),
     );
   }
 }

@@ -26,17 +26,17 @@ class ProductController extends Controller
             $request->validate([
                 'name' => 'required|string|unique:products,name',
                 'price' => 'required|integer',
-                'photo' => 'required|image|max:10240',
+                'photo' => 'required|string',
                 'is_promo' => 'required|boolean',
             ]);
 
-            $imgPath = $request->file('photo')->store('img', options: 'public');
-            $imgPath = str_replace('public/', 'storage/', $imgPath);
+            // $imgPath = $request->file('photo')->store('img', options: 'public');
+            // $imgPath = str_replace('public/', 'storage/', $imgPath);
             
             $product = Product::create([
                 'name' => $request->name,
                 'price' => $request->price,
-                'photo' => $imgPath,
+                'photo' => $request->photo,
                 'is_promo' => $request->is_promo,
             ]);
             return response()->json(['message' => 'Successfully created the product.', 'product' => $product], 201);
@@ -71,19 +71,19 @@ class ProductController extends Controller
             $request->validate([
                 'name' => 'string|unique:products,name,' . $product->id,
                 'price' => 'integer',
-                'photo' => 'image|max:10240',
+                'photo' => 'string',
                 'is_promo' => 'boolean',
             ]);
 
-            if ($request->hasFile('photo')) {
-                $imgPath = $request->file('photo')->store('img', options: 'public');
-                $imgPath = str_replace('public/', 'storage/', $imgPath);
-            }
+            // if ($request->hasFile('photo')) {
+            //     $imgPath = $request->file('photo')->store('img', options: 'public');
+            //     $imgPath = str_replace('public/', 'storage/', $imgPath);
+            // }
 
             $product->update([
                 'name' => $request->name ?? $product->name,
                 'price' => $request->price ?? $product->price,
-                'photo' => $imgPath ?? $product->photo,
+                'photo' => $request->photo ?? $product->photo,
                 'is_promo' => $request->is_promo ?? $product->is_promo,
             ]);
 
