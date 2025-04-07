@@ -30,7 +30,7 @@ class ProductController extends Controller
                 'is_promo' => 'required|boolean',
             ]);
 
-            $imgPath = $request->file('photo')->store('public/img');
+            $imgPath = $request->file('photo')->store('img', options: 'public');
             $imgPath = str_replace('public/', 'storage/', $imgPath);
             
             $product = Product::create([
