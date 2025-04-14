@@ -1,9 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 import 'add_product.dart';
-import 'delete_product.dart';
-import 'edit_product.dart';
 import 'home_screen.dart';
 
 void main() {
@@ -36,8 +32,6 @@ class _ProductListScreenState extends State<ProductListScreen> {
   final List<Widget> _screens = [
     HomeScreen(),
     AddProductScreen(),
-    EditProductScreen(),
-    // DeleteProductScreen(),
   ];
 
   @override
@@ -55,14 +49,6 @@ class _ProductListScreenState extends State<ProductListScreen> {
           BottomNavigationBarItem(
             icon: Icon(Icons.add_circle_outline),
             label: 'Add',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.edit),
-            label: 'Edit',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.delete_forever),
-            label: 'Delete',
           ),
         ],
         currentIndex: _currentIndex,

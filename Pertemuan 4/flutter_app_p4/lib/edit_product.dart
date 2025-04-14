@@ -2,140 +2,92 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 
-class EditProductScreen extends StatefulWidget {
-  const EditProductScreen({super.key});
+class EditProductForm extends StatefulWidget {
+  final Map<String, dynamic> product;
+  final VoidCallback onSuccess;
+
+  const EditProductForm({super.key, required this.product, required this.onSuccess});
 
   @override
-  State<EditProductScreen> createState() => _EditProductScreenState();
+  State<EditProductForm> createState() => _EditProductFormState();
 }
 
-class _EditProductScreenState extends State<EditProductScreen> {
-  List products = [];
-  Map<String, dynamic>? selectedProduct;
-
-  final _formKey = GlobalKey<FormState>();
-  final _nameController = TextEditingController();
-  final _priceController = TextEditingController();
-  final _photoController = TextEditingController();
-  bool _isPromo = false;
+class _EditProductFormState extends State<EditProductForm> {
+  late TextEditingController _nameController;
+  late TextEditingController _priceController;
+  late TextEditingController _photoController;
+  late bool _isPromo;
 
   @override
   void initState() {
     super.initState();
-    fetchProducts();
-  }
-
-  Future<void> fetchProducts() async {
-    final response = await http.get(Uri.parse('http://localhost:8000/api/products'));
-    if (response.statusCode == 200) {
-      setState(() {
-        products = json.decode(response.body);
-      });
-    } else {
-      throw Exception('Failed to load products');
-    }
-  }
-
-  void fillForm(Map<String, dynamic> product) {
-    setState(() {
-      selectedProduct = product;
-      _nameController.text = product['name'];
-      _priceController.text = product['price'].toString();
-      _photoController.text = product['photo'];
-      _isPromo = product['is_promo'] ?? false;
-    });
+    _nameController = TextEditingController(text: widget.product['name']);
+    _priceController = TextEditingController(text: widget.product['price'].toString());
+    _photoController = TextEditingController(text: widget.product['photo']);
+    _isPromo = widget.product['is_promo'] == true;
   }
 
   Future<void> _submitEdit() async {
-    if (_formKey.currentState!.validate() && selectedProduct != null) {
-      final response = await http.put(
-        Uri.parse('http://localhost:8000/api/products/${selectedProduct!['id']}'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'name': _nameController.text,
-          'price': int.parse(_priceController.text),
-          'photo': _photoController.text,
-          'is_promo': _isPromo,
-        }),
-      );
+    final response = await http.put(
+      Uri.parse('http://localhost:8000/api/products/${widget.product['id']}'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'name': _nameController.text,
+        'price': int.tryParse(_priceController.text),
+        'photo': _photoController.text,
+        'is_promo': _isPromo,
+      }),
+    );
 
-      if (response.statusCode == 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Product updated successfully!')),
-        );
-        setState(() {
-          selectedProduct = null;
-        });
-        await fetchProducts(); // refresh list
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to update product')),
-        );
-      }
+    if (response.statusCode == 200) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Product updated successfully")),
+      );
+      widget.onSuccess();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Failed to update product")),
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return selectedProduct == null
-        ? ListView.builder(
-            itemCount: products.length,
-            itemBuilder: (context, index) {
-              final product = products[index];
-              return ListTile(
-                title: Text(product['name']),
-                onTap: () => fillForm(product),
-              );
-            },
-          )
-        : Center(
-            child: SingleChildScrollView(
-              child: SizedBox(
-                width: MediaQuery.of(context).size.width * 0.5,
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    children: [
-                      const Text('Edit Product', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 16),
-                      TextFormField(
-                        controller: _nameController,
-                        decoration: const InputDecoration(labelText: 'Product Name'),
-                        validator: (value) => value == null || value.isEmpty ? 'Enter product name' : null,
-                      ),
-                      TextFormField(
-                        controller: _priceController,
-                        decoration: const InputDecoration(labelText: 'Price'),
-                        keyboardType: TextInputType.number,
-                        validator: (value) => value == null || int.tryParse(value) == null ? 'Enter valid price' : null,
-                      ),
-                      TextFormField(
-                        controller: _photoController,
-                        decoration: const InputDecoration(labelText: 'Photo URL'),
-                        validator: (value) => value == null || value.isEmpty ? 'Enter photo URL' : null,
-                      ),
-                      const SizedBox(height: 10),
-                      Image.network(_photoController.text, height: 150, errorBuilder: (_, __, ___) => const Icon(Icons.broken_image)),
-                      SwitchListTile(
-                        title: const Text('Promo'),
-                        value: _isPromo,
-                        onChanged: (val) => setState(() => _isPromo = val),
-                      ),
-                      ElevatedButton(
-                        onPressed: () async {
-                          await _submitEdit();
-                        },
-                        child: const Text('Submit Edit'),
-                      ),
-                      TextButton(
-                        onPressed: () => setState(() => selectedProduct = null),
-                        child: const Text('Cancel'),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+    return Material( // Required to avoid 'No Material widget' error
+      child: SingleChildScrollView(
+        child: Column(
+          children: [
+            const Text('Edit Product', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
+            Image.network(widget.product['photo'], height: 120),
+            TextFormField(
+              controller: _nameController,
+              decoration: const InputDecoration(labelText: 'Product Name'),
             ),
-          );
+            TextFormField(
+              controller: _priceController,
+              decoration: const InputDecoration(labelText: 'Price'),
+              keyboardType: TextInputType.number,
+            ),
+            TextFormField(
+              controller: _photoController,
+              decoration: const InputDecoration(labelText: 'Photo URL'),
+            ),
+            SwitchListTile(
+              title: const Text('Promo'),
+              value: _isPromo,
+              onChanged: (val) => setState(() => _isPromo = val),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: _submitEdit,
+              child: const Text('Save Changes'),
+            ),
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
+    );
   }
 }
+
