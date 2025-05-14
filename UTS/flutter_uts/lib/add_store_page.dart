@@ -15,16 +15,33 @@ class _AddStorePageState extends State<AddStorePage> {
   final TextEditingController _nameController = TextEditingController();
   
 
-  void _saveStore() async {    
+  void _saveStore() async {
     if (_formKey.currentState!.validate()) {
       final prefs = await SharedPreferences.getInstance();
-      await FirebaseFirestore.instance.collection('stores').add({
-        'code': int.parse(_nimController.text.trim()),
-        'name': _nameController.text.trim(),
-      });
-      await prefs.setInt('code', int.parse(_nimController.text.trim())); 
-      await prefs.setString('name', _nameController.text.trim());
-      await prefs.setString('store_ref', 'stores/7');
+      final code = _nimController.text.trim();
+      final name = _nameController.text.trim();
+
+      final querySnapshot = await FirebaseFirestore.instance
+          .collection('stores')
+          .where('code', isEqualTo: code)
+          .limit(1)
+          .get();
+
+      DocumentReference storeRef;
+
+      if (querySnapshot.docs.isNotEmpty) {
+        storeRef = querySnapshot.docs.first.reference;
+      } else {
+        final newDoc = await FirebaseFirestore.instance.collection('stores').add({
+          'code': code,
+          'name': name,
+        });
+        storeRef = newDoc;
+      }
+
+      await prefs.setString('code', code);
+      await prefs.setString('name', name);
+      await prefs.setString('store_ref', storeRef.path);
 
       if (mounted) Navigator.pop(context);
     }

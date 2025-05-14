@@ -5,7 +5,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'firebase_options.dart';
 import 'add_receipt_page.dart';
 import 'add_store_page.dart';
-import 'add_detail_page.dart';
 import 'edit_receipt_page.dart';
 
 void main() async {
@@ -71,57 +70,68 @@ class ReceiptListPage extends StatefulWidget {
 }
 
 class _ReceiptListPageState extends State<ReceiptListPage> {
-  final CollectionReference receipts = FirebaseFirestore.instance.collection('purchaseGoodsReceipts');
   DocumentReference? _storeRef;
-  Stream<QuerySnapshot>? _receiptStream;
+  List<DocumentSnapshot> _allReceipts = [];
+  bool _loading = true;
 
   @override
   void initState() {
     super.initState();
-    _loadStoreRef();
+    _loadReceiptsForStore();
   }
 
-  Future<void> _loadStoreRef() async {
+  Future<void> _loadReceiptsForStore() async {
     final prefs = await SharedPreferences.getInstance();
     final storeRefPath = prefs.getString('store_ref');
-    if (storeRefPath != null && storeRefPath.isNotEmpty) {
-      final storeRef = FirebaseFirestore.instance.doc(storeRefPath);
-      setState(() {
-        _storeRef = storeRef;
-        _receiptStream = receipts
-            .where('store_ref', isEqualTo: storeRef)
-            .orderBy('created_at', descending: true)
-            .snapshots();
-      });
+    if (storeRefPath == null || storeRefPath.isEmpty) return;
+
+    final storeRef = FirebaseFirestore.instance.doc(storeRefPath);
+    final receiptsSnapshot = await FirebaseFirestore.instance
+        .collection('purchaseGoodsReceipts')
+        .where('store_ref', isEqualTo: storeRef)
+        .get();
+
+    List<DocumentSnapshot> allReceipts = [];
+
+    for (var receipt in receiptsSnapshot.docs) {
+      allReceipts.add(receipt);
     }
+
+    setState(() {
+      _storeRef = storeRef;
+      _allReceipts = allReceipts;
+      _loading = false;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Receipt List')),
-      body: _storeRef == null
+      body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : StreamBuilder<QuerySnapshot>(
-              stream: _receiptStream,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                  return const Center(child: Text('Tidak ada produk.'));
-                }
-                return ListView(
-                  children: snapshot.data!.docs.map((DocumentSnapshot document) {
-                    final data = document.data()! as Map<String, dynamic>;
+          : _allReceipts.isEmpty
+              ? const Center(child: Text('Tidak ada produk.'))
+              : ListView.builder(
+                  itemCount: _allReceipts.length,
+                  itemBuilder: (context, index) {
+                    final document = _allReceipts[index];
+                    final data = document.data() as Map<String, dynamic>;
+
                     return GestureDetector(
-                      onTap: () {
-                        showModalBottomSheet(
-                          context: context,
-                          isScrollControlled: true,
-                          builder: (_) => EditReceiptModal(document: document),
-                        );
-                      },
+                      onTap: () async {
+                          final result = await showModalBottomSheet(
+                            context: context,
+                            isScrollControlled: true,
+                            builder: (_) => EditReceiptModal(
+                              receiptRef: document.reference,
+                              receiptData: data,
+                            ),
+                          ); 
+                          if (result == 'deleted' || result == 'updated') {
+                            await _loadReceiptsForStore();
+                          }
+                        },
                       child: Card(
                         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                         child: Padding(
@@ -144,23 +154,29 @@ class _ReceiptListPageState extends State<ReceiptListPage> {
                         ),
                       ),
                     );
-                  }).toList(),
-                );
-              },
-            ),
+                  },
+                ),
       floatingActionButton: Column(
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
           ElevatedButton(
-            onPressed: () {
-              Navigator.push(context, MaterialPageRoute(builder: (context) => AddStorePage()));
+            onPressed: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => AddStorePage()),
+              );
+              await _loadReceiptsForStore();
             },
             child: const Text('Tambah Nama Toko'),
           ),
           const SizedBox(height: 10),
           ElevatedButton(
-            onPressed: () {
-              Navigator.push(context, MaterialPageRoute(builder: (context) => AddReceiptPage()));
+            onPressed: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => AddReceiptPage()),
+              );
+              await _loadReceiptsForStore();
             },
             child: const Text('Tambah Receipt'),
           ),
@@ -170,69 +186,79 @@ class _ReceiptListPageState extends State<ReceiptListPage> {
   }
 }
 
-class ReceiptDetailsPage extends StatelessWidget {
+class ReceiptDetailsPage extends StatefulWidget {
   const ReceiptDetailsPage({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final detailsCollection = FirebaseFirestore.instance.collectionGroup('details');
+  State<ReceiptDetailsPage> createState() => _ReceiptDetailsPageState();
+}
 
+class _ReceiptDetailsPageState extends State<ReceiptDetailsPage> {
+  DocumentReference? _storeRef;
+  List<DocumentSnapshot> _allDetails = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDetailsForStore();
+  }
+
+  Future<void> _loadDetailsForStore() async {
+    final prefs = await SharedPreferences.getInstance();
+    final storeRefPath = prefs.getString('store_ref');
+    if (storeRefPath == null || storeRefPath.isEmpty) return;
+
+    final storeRef = FirebaseFirestore.instance.doc(storeRefPath);
+    final receiptsSnapshot = await FirebaseFirestore.instance
+        .collection('purchaseGoodsReceipts')
+        .where('store_ref', isEqualTo: storeRef)
+        .get();
+
+    List<DocumentSnapshot> allDetails = [];
+
+    for (var receipt in receiptsSnapshot.docs) {
+      final detailsSnapshot = await receipt.reference.collection('details').get();
+      allDetails.addAll(detailsSnapshot.docs);
+    }
+
+    setState(() {
+      _storeRef = storeRef;
+      _allDetails = allDetails;
+      _loading = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Receipt Details')),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: detailsCollection.snapshots(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return const Center(child: Text('Tidak ada detail produk.'));
-          }
-          return ListView(
-            children: snapshot.data!.docs.map((DocumentSnapshot document) {
-              final data = document.data()! as Map<String, dynamic>;
-              return 
-              GestureDetector(
-                onTap: () 
-                {
-                  showModalBottomSheet(
-                    context: context,
-                    isScrollControlled: true,
-                    builder: (_) => EditReceiptModal(document: document),
-                  );
-                },
-                child: Card(
-                  margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text("Product Ref: ${data['product_ref'].path}"),
-                        Text("Qty: ${data['qty']}"),
-                        Text("Unit: ${data['unit_name']}"),
-                        Text("Price: ${data['price']}"),
-                        Text("Subtotal: ${data['subtotal']}"),
-                      ],
-                    ),
-                  ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _allDetails.isEmpty
+              ? const Center(child: Text('Tidak ada detail produk.'))
+              : ListView.builder(
+                  itemCount: _allDetails.length,
+                  itemBuilder: (context, index) {
+                    final data = _allDetails[index].data() as Map<String, dynamic>;
+                    return Card(
+                      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text("Product Ref: ${data['product_ref'].path}"),
+                            Text("Qty: ${data['qty']}"),
+                            Text("Unit: ${data['unit_name']}"),
+                            Text("Price: ${data['price']}"),
+                            Text("Subtotal: ${data['subtotal']}"),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
                 ),
-              );
-            }).toList(),
-          );
-        },
-      ),
-      floatingActionButton: Column(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          ElevatedButton(
-            onPressed: () {
-              Navigator.push(context, MaterialPageRoute(builder: (context) => AddDetailPage()));
-            },
-            child: const Text('Tambah Produk'),
-          ),
-        ],
-      ),
     );
   }
 }
