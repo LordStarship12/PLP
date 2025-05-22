@@ -31,9 +31,14 @@ class _AddReceiptPageState extends State<AddReceiptPage> {
   }
 
   Future<void> _fetchDropdownData() async {
-    final suppliers = await FirebaseFirestore.instance.collection('suppliers').get();
-    final warehouses = await FirebaseFirestore.instance.collection('warehouses').get();
-    final products = await FirebaseFirestore.instance.collection('products').get();
+    final prefs = await SharedPreferences.getInstance();
+    final storeRefPath = prefs.getString('store_ref');
+    if (storeRefPath == null) return;
+    final storeRef = FirebaseFirestore.instance.doc(storeRefPath);
+
+    final suppliers = await FirebaseFirestore.instance.collection('suppliers').where('store_ref', isEqualTo: storeRef).get();
+    final warehouses = await FirebaseFirestore.instance.collection('warehouses').where('store_ref', isEqualTo: storeRef).get();
+    final products = await FirebaseFirestore.instance.collection('products').where('store_ref', isEqualTo: storeRef).get();
 
     setState(() {
       _suppliers = suppliers.docs;
@@ -146,10 +151,14 @@ class _AddReceiptPageState extends State<AddReceiptPage> {
                                     child: Text(doc['name']),
                                   );
                                 }).toList(),
-                                onChanged: (value) => setState(() {
-                                  item.productRef = value;
-                                  item.unitName = value!.id == '1' ? 'pcs' : 'dus';
-                                }),
+                                onChanged: (value) {
+                                  final selectedProduct = _products.firstWhere((doc) => doc.reference == value);
+                                  setState(() {
+                                    item.productRef = value;
+                                    item.unitName = selectedProduct['unit_name'] ?? 'unit';
+                                    item.unitController.text = item.unitName;
+                                  });
+                                },
                                 decoration: InputDecoration(labelText: "Produk"),
                                 validator: (value) => value == null ? 'Pilih produk' : null,
                               ),
@@ -172,7 +181,12 @@ class _AddReceiptPageState extends State<AddReceiptPage> {
                                 validator: (val) => val!.isEmpty ? 'Wajib diisi' : null,
                               ),
                               SizedBox(height: 8),
-                              Text("Satuan: ${item.unitName}"),
+                              TextFormField(
+                                controller: item.unitController,
+                                decoration: InputDecoration(labelText: "Satuan"),
+                                onChanged: (val) => setState(() => item.unitName = val),
+                                validator: (val) => val!.isEmpty ? 'Wajib diisi' : null,
+                              ),
                               Text("Subtotal: ${item.subtotal}"),
                               SizedBox(height: 4),
                               TextButton.icon(
@@ -211,6 +225,7 @@ class _DetailItem {
   int price = 0;
   int qty = 1;
   String unitName = 'unit';
+  TextEditingController unitController = TextEditingController();
   final List<DocumentSnapshot> products;
 
   _DetailItem({required this.products});
@@ -222,7 +237,7 @@ class _DetailItem {
       'product_ref': productRef,
       'price': price,
       'qty': qty,
-      'unit_name': unitName,
+      'unit_name': unitController.text.trim(),
       'subtotal': subtotal,
     };
   }

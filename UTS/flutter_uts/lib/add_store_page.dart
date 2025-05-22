@@ -27,25 +27,23 @@ class _AddStorePageState extends State<AddStorePage> {
           .limit(1)
           .get();
 
-      DocumentReference storeRef;
-
-      if (querySnapshot.docs.isNotEmpty) {
-        storeRef = querySnapshot.docs.first.reference;
-      } else {
-        final newDoc = await FirebaseFirestore.instance.collection('stores').add({
-          'code': code,
-          'name': name,
-        });
-        storeRef = newDoc;
+      if (querySnapshot.docs.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Store dengan kode tersebut tidak ditemukan.")),
+        );
+        return;
       }
 
+      final storeDoc = querySnapshot.docs.first;
+  
       await prefs.setString('code', code);
       await prefs.setString('name', name);
-      await prefs.setString('store_ref', storeRef.path);
+      await prefs.setString('store_ref', storeDoc.reference.path);
 
       if (mounted) Navigator.pop(context);
     }
   }
+
 
   @override
   Widget build(BuildContext context) {

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-class AddNotePage extends StatefulWidget{
+class AddNotePage extends StatefulWidget {
   final String myUserId;
 
   const AddNotePage({super.key, required this.myUserId});
@@ -14,17 +14,17 @@ class _AddNotePageState extends State<AddNotePage> {
   final TextEditingController _titleController = TextEditingController();
   final TextEditingController _contentController = TextEditingController();
 
-  void _saveNote() async {    
+  void _saveNote() async {
     if (_formKey.currentState!.validate()) {
       await FirebaseFirestore.instance.collection('notes').add({
         'title': _titleController.text.trim(),
         'content': _contentController.text.trim(),
         'created_at': Timestamp.now(),
         'synced': false,
-        'created_by': widget.myUserId,
+        'created_by': widget.myUserId, // ✅ Always "Timothy"
       });
 
-      Navigator.pop(context);
+      if (mounted) Navigator.pop(context, true);
     }
   }
 
@@ -42,13 +42,13 @@ class _AddNotePageState extends State<AddNotePage> {
                 controller: _titleController,
                 decoration: InputDecoration(labelText: "Judul"),
                 validator: (value) =>
-                  value!.isEmpty ? 'Judul tidak boleh kosong' : null,
+                    value!.isEmpty ? 'Judul tidak boleh kosong' : null,
               ),
               TextFormField(
                 controller: _contentController,
                 decoration: InputDecoration(labelText: "Isi Catatan"),
                 validator: (value) =>
-                  value!.isEmpty ? 'Isi tidak boleh kosong' : null,
+                    value!.isEmpty ? 'Isi tidak boleh kosong' : null,
               ),
               SizedBox(height: 24),
               ElevatedButton(

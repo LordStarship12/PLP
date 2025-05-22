@@ -91,42 +91,6 @@ class _EditReceiptModalState extends State<EditReceiptModal> {
     setState(() => _productDetails.add(_DetailItem(products: _products)));
   }
 
-  void _confirmDeleteReceipt() async {
-    final shouldDelete = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Konfirmasi'),
-        content: Text('Yakin ingin menghapus receipt ini? Semua detail akan ikut terhapus.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text('Batal'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text('Hapus', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-
-    if (shouldDelete != true) return;
-    final detailsRef = widget.receiptRef.collection('details');
-    final detailDocs = await detailsRef.get();
-    for (var doc in detailDocs.docs) {
-      await doc.reference.delete();
-    }
-
-    await widget.receiptRef.delete();
-
-    await FirebaseFirestore.instance
-        .collection('purchaseGoodsReceipts')
-        .doc(widget.receiptRef.id)
-        .delete();
-
-    if(mounted){Navigator.pop(context, 'deleted');};
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -239,15 +203,6 @@ class _EditReceiptModalState extends State<EditReceiptModal> {
                     ElevatedButton(
                       onPressed: _updateReceipt,
                       child: Text('Update Receipt'),
-                    ),
-                    SizedBox(height: 10),
-                    ElevatedButton(
-                      onPressed: _confirmDeleteReceipt,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red,
-                        foregroundColor: Colors.white,
-                      ),
-                      child: Text('Hapus Receipt'),
                     ),
                   ],
                 ),
