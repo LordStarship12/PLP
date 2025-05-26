@@ -74,6 +74,14 @@ class _AddReceiptPageState extends State<AddReceiptPage> {
 
     for (final item in _productDetails) {
       await receiptDoc.collection('details').add(item.toMap());
+    
+      if (item.productRef != null) {
+        final productSnap = await item.productRef!.get();
+        final currentQty = productSnap['qty'] ?? 0;
+        await item.productRef!.update({
+          'qty': currentQty + item.qty,
+        });
+      }
     }
 
     if (mounted) Navigator.pop(context);
@@ -152,10 +160,9 @@ class _AddReceiptPageState extends State<AddReceiptPage> {
                                   );
                                 }).toList(),
                                 onChanged: (value) {
-                                  final selectedProduct = _products.firstWhere((doc) => doc.reference == value);
                                   setState(() {
                                     item.productRef = value;
-                                    item.unitName = selectedProduct['unit_name'] ?? 'unit';
+                                    item.unitName = 'pcs';
                                     item.unitController.text = item.unitName;
                                   });
                                 },
@@ -181,12 +188,6 @@ class _AddReceiptPageState extends State<AddReceiptPage> {
                                 validator: (val) => val!.isEmpty ? 'Wajib diisi' : null,
                               ),
                               SizedBox(height: 8),
-                              TextFormField(
-                                controller: item.unitController,
-                                decoration: InputDecoration(labelText: "Satuan"),
-                                onChanged: (val) => setState(() => item.unitName = val),
-                                validator: (val) => val!.isEmpty ? 'Wajib diisi' : null,
-                              ),
                               Text("Subtotal: ${item.subtotal}"),
                               SizedBox(height: 4),
                               TextButton.icon(

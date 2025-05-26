@@ -29,6 +29,7 @@
 
         await FirebaseFirestore.instance.collection('products').add({
           'name': _productController.text.trim(),
+          'qty': 0,
           'store_ref': storeRef,
         });
 

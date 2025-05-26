@@ -1,22 +1,33 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter_uts/products/edit_product_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-
-import 'suppliers/edit_supplier_page.dart';
-import 'products/add_product_page.dart';
-import 'suppliers/add_supplier_page.dart';
-import 'warehouses/add_warehouse_page.dart';
 import 'package:intl/intl.dart';
+
+import 'products/add_product_page.dart';
+import 'products/edit_product_page.dart';
+import 'receipts/add_receipt_page.dart';
+import 'receipts/edit_receipt_page.dart';
+import 'suppliers/add_supplier_page.dart';
+import 'suppliers/edit_supplier_page.dart';
+import 'warehouses/add_warehouse_page.dart';
+import 'warehouses/edit_warehouse_page.dart';
 import 'firebase_options.dart';
-import 'add_receipt_page.dart';
-import 'add_store_page.dart';
-import 'edit_receipt_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  
+  final prefs = await SharedPreferences.getInstance();
+  final querySnapshot = await FirebaseFirestore.instance
+      .collection('stores')
+      .where('code', isEqualTo: "22100034")
+      .limit(1)
+      .get();
+
+  final storeDoc = querySnapshot.docs.first;
+  await prefs.setString('store_ref', storeDoc.reference.path);
+
   runApp(const MainApp());
 }
 
@@ -92,7 +103,6 @@ class ReceiptListPage extends StatefulWidget {
 }
 
 class _ReceiptListPageState extends State<ReceiptListPage> {
-  DocumentReference? _storeRef;
   List<DocumentSnapshot> _allReceipts = [];
   bool _loading = true;
 
@@ -120,7 +130,6 @@ class _ReceiptListPageState extends State<ReceiptListPage> {
     }
 
     setState(() {
-      _storeRef = storeRef;
       _allReceipts = allReceipts;
       _loading = false;
     });
@@ -258,17 +267,6 @@ class _ReceiptListPageState extends State<ReceiptListPage> {
             onPressed: () async {
               await Navigator.push(
                 context,
-                MaterialPageRoute(builder: (context) => AddStorePage()),
-              );
-              await _loadReceiptsForStore();
-            },
-            child: const Text('Pengaturan Toko'),
-          ),
-          const SizedBox(height: 10),
-          ElevatedButton(
-            onPressed: () async {
-              await Navigator.push(
-                context,
                 MaterialPageRoute(builder: (context) => AddReceiptPage()),
               );
               await _loadReceiptsForStore();
@@ -289,7 +287,6 @@ class ReceiptDetailsPage extends StatefulWidget {
 }
 
 class _ReceiptDetailsPageState extends State<ReceiptDetailsPage> {
-  DocumentReference? _storeRef;
   List<DocumentSnapshot> _allDetails = [];
   bool _loading = true;
 
@@ -318,7 +315,6 @@ class _ReceiptDetailsPageState extends State<ReceiptDetailsPage> {
     }
 
     setState(() {
-      _storeRef = storeRef;
       _allDetails = allDetails;
       _loading = false;
     });
@@ -384,7 +380,6 @@ class SuppliersPage extends StatefulWidget {
 }
 
 class _SuppliersPage extends State<SuppliersPage> {
-  DocumentReference? _storeRef;
   List<DocumentSnapshot> _allSuppliers = [];
   bool _loading = true;
 
@@ -412,7 +407,6 @@ class _SuppliersPage extends State<SuppliersPage> {
     }
 
     setState(() {
-      _storeRef = storeRef;
       _allSuppliers = allSuppliers;
       _loading = false;
     });
@@ -522,7 +516,6 @@ class WarehousesPage extends StatefulWidget {
 }
 
 class _WarehousesPage extends State<WarehousesPage> {
-  DocumentReference? _storeRef;
   List<DocumentSnapshot> _allWarehouses = [];
   bool _loading = true;
 
@@ -550,7 +543,6 @@ class _WarehousesPage extends State<WarehousesPage> {
     }
 
     setState(() {
-      _storeRef = storeRef;
       _allWarehouses = allWarehouses;
       _loading = false;
     });
@@ -589,8 +581,8 @@ class _WarehousesPage extends State<WarehousesPage> {
                                     final result = await showModalBottomSheet(
                                       context: context,
                                       isScrollControlled: true,
-                                      builder: (_) => EditSupplierModal(
-                                        supplierRef: document.reference,
+                                      builder: (_) => EditWarehouseModal(
+                                        warehouseRef: document.reference,
                                       ),
                                     );
                                     if (result == 'updated') {
@@ -713,7 +705,13 @@ class _ProductsPage extends State<ProductsPage> {
                           crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
                             Expanded(
-                              child: Text("Nama Product: ${data['name']}"),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text("Nama Product: ${data['name']}"),
+                                  Text("Qty: ${data['qty']} pcs")
+                                ]
+                              ) 
                             ),
                             Row(
                               mainAxisSize: MainAxisSize.min,
