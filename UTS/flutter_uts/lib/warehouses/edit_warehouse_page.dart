@@ -46,6 +46,10 @@ class _EditWarehouseModalState extends State<EditWarehouseModal> {
       'updated_at': DateTime.now(),
     });
 
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text("Warehouse berhasil diedit.")),
+    );
+
     if (mounted) {
       Navigator.pop(context, 'updated');
     }

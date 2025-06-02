@@ -2,14 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-class AddReceiptPage extends StatefulWidget {
-  const AddReceiptPage({super.key});
+class AddDeliveryPage extends StatefulWidget {
+  const AddDeliveryPage({super.key});
 
   @override
-  State<AddReceiptPage> createState() => _AddReceiptPageState();
+  State<AddDeliveryPage> createState() => _AddDeliveryPageState();
 }
 
-class _AddReceiptPageState extends State<AddReceiptPage> {
+class _AddDeliveryPageState extends State<AddDeliveryPage> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _formNumberController = TextEditingController();
   DateTime? _selectedPostDate;
@@ -42,32 +42,11 @@ class _AddReceiptPageState extends State<AddReceiptPage> {
     final warehouses = await FirebaseFirestore.instance.collection('warehouses').where('store_ref', isEqualTo: storeRef).get();
     final products = await FirebaseFirestore.instance.collection('products').where('store_ref', isEqualTo: storeRef).get();
 
-    final generatedFormNo = await _generateFormNumber(); 
-
     setState(() {
       _suppliers = suppliers.docs;
       _warehouses = warehouses.docs;
       _products = products.docs;
-      _formNumberController.text = generatedFormNo;
     });
-  }
-
-  Future<String> _generateFormNumber() async {
-    final receipts = await FirebaseFirestore.instance
-        .collection('purchaseGoodsReceipts')
-        .orderBy('created_at', descending: true)
-        .get();
-    int nextNumber = 1;
-    final base = 'TTB22100034';
-    if (receipts.docs.isNotEmpty) {
-      final lastForm = receipts.docs.first['no_form'];
-      final parts = lastForm.split('_');
-      if (parts.length == 2) {
-        final number = int.tryParse(parts[1]) ?? 0;
-        nextNumber = number + 1;
-      }
-    }
-    return '${base}_$nextNumber';
   }
 
   Future<void> _saveReceipt() async {
@@ -103,37 +82,6 @@ class _AddReceiptPageState extends State<AddReceiptPage> {
         final currentQty = productSnap['qty'] ?? 0;
         await item.productRef!.update({
           'qty': currentQty + item.qty,
-        });
-      }
-      
-      final stockQuery = await FirebaseFirestore.instance
-        .collection('stocks')
-        .where('store_ref', isEqualTo: storeRef)
-        .where('warehouse_ref', isEqualTo: _selectedWarehouse)
-        .where('product_ref', isEqualTo: item.productRef)
-        .get();
-
-      if (stockQuery.docs.isNotEmpty) {
-        final stockDoc = stockQuery.docs.first;
-        final currentStock = stockDoc['qty'] ?? 0;
-        await stockDoc.reference.update({'qty': currentStock + item.qty});
-      } else {
-        final stocksSnap = await FirebaseFirestore.instance
-            .collection('stocks')
-            .orderBy('id', descending: true)
-            .limit(1)
-            .get();
-
-        final nextId = stocksSnap.docs.isNotEmpty
-            ? (stocksSnap.docs.first['id'] ?? 0) + 1
-            : 1;
-
-        await FirebaseFirestore.instance.collection('stocks').add({
-          'id': nextId,
-          'store_ref': storeRef,
-          'warehouse_ref': _selectedWarehouse,
-          'product_ref': item.productRef,
-          'qty': item.qty,
         });
       }
     }
@@ -189,7 +137,7 @@ class _AddReceiptPageState extends State<AddReceiptPage> {
                     TextFormField(
                       controller: _formNumberController,
                       decoration: InputDecoration(labelText: 'No. Form'),
-                      readOnly: true,
+                      validator: (value) => value!.isEmpty ? 'Wajib diisi' : null,
                     ),
                     SizedBox(height: 16),
                     DropdownButtonFormField<DocumentReference>(
@@ -247,20 +195,18 @@ class _AddReceiptPageState extends State<AddReceiptPage> {
                                     item.productRef = value;
                                     item.unitName = 'pcs';
                                     item.unitController.text = item.unitName;
-                                    
-                                    final selectedProduct = _products.firstWhere((doc) => doc.reference == value);
-                                    final defaultPrice = selectedProduct['default_price'] ?? 0;
-                                    item.priceController.text = defaultPrice.toString();
                                   });
                                 },
                                 decoration: InputDecoration(labelText: "Produk"),
                                 validator: (value) => value == null ? 'Pilih produk' : null,
                               ),
                               TextFormField(
-                                controller: item.priceController,
+                                initialValue: item.price.toString(),
                                 decoration: InputDecoration(labelText: "Harga"),
                                 keyboardType: TextInputType.number,
-                                onChanged: (_) => setState(() {}), 
+                                onChanged: (val) => setState(() {
+                                  item.price = int.tryParse(val) ?? 0;
+                                }),
                                 validator: (val) => val!.isEmpty ? 'Wajib diisi' : null,
                               ),
                               TextFormField(
@@ -308,16 +254,14 @@ class _AddReceiptPageState extends State<AddReceiptPage> {
 
 class _DetailItem {
   DocumentReference? productRef;
+  int price = 0;
   int qty = 1;
   String unitName = 'unit';
-  final List<DocumentSnapshot> products;
-
-  TextEditingController priceController = TextEditingController();
   TextEditingController unitController = TextEditingController();
+  final List<DocumentSnapshot> products;
 
   _DetailItem({required this.products});
 
-  int get price => int.tryParse(priceController.text) ?? 0;
   int get subtotal => price * qty;
 
   Map<String, dynamic> toMap() {
@@ -330,4 +274,3 @@ class _DetailItem {
     };
   }
 }
-

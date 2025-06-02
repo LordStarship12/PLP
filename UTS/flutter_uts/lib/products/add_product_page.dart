@@ -12,6 +12,7 @@
   class _AddProductPageState extends State<AddProductPage> {
     final _formKey = GlobalKey<FormState>();
     final TextEditingController _productController = TextEditingController();
+    final TextEditingController _priceController = TextEditingController();
 
     void _saveProduct() async {
       if (_formKey.currentState!.validate()) {
@@ -30,6 +31,7 @@
         await FirebaseFirestore.instance.collection('products').add({
           'name': _productController.text.trim(),
           'qty': 0,
+          'default_price': int.tryParse(_priceController.text.trim()) ?? 0,
           'store_ref': storeRef,
         });
 
@@ -45,7 +47,7 @@
     @override
     Widget build(BuildContext context) {
       return Scaffold(
-        appBar: AppBar(title: Text("Tambah Supplier")),
+        appBar: AppBar(title: Text("Tambah Product")),
         body: Padding(
           padding: const EdgeInsets.all(16.0),
           child: Form(
@@ -55,6 +57,12 @@
                 TextFormField(
                   controller: _productController,
                   decoration: InputDecoration(labelText: 'Nama Produk'),
+                  validator: (value) => value!.isEmpty ? 'Wajib diisi' : null,
+                ),
+                SizedBox(height: 24),
+                TextFormField(
+                  controller: _priceController,
+                  decoration: InputDecoration(labelText: 'Harga Default Produk'),
                   validator: (value) => value!.isEmpty ? 'Wajib diisi' : null,
                 ),
                 SizedBox(height: 24),

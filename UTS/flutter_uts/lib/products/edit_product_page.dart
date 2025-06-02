@@ -16,6 +16,7 @@ class EditProductModal extends StatefulWidget {
 class _EditProductModalState extends State<EditProductModal> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _productNameController = TextEditingController();
+  final TextEditingController _priceController = TextEditingController();
   bool _loading = true;
 
   @override
@@ -29,6 +30,7 @@ class _EditProductModalState extends State<EditProductModal> {
       final doc = await widget.productRef.get();
       final data = doc.data() as Map<String, dynamic>?;
       _productNameController.text = data?['name'] ?? '';
+      _priceController.text = (data?['default_price']?.toString() ?? '');
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to load product data')),
@@ -43,8 +45,13 @@ class _EditProductModalState extends State<EditProductModal> {
 
     await widget.productRef.update({
       'name': _productNameController.text.trim(),
+      'default_price': int.tryParse(_priceController.text.trim()) ?? 0,
       'updated_at': DateTime.now(),
     });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text("Product berhasil diedit.")),
+    );
 
     if (mounted) {
       Navigator.pop(context, 'updated');
@@ -66,6 +73,12 @@ class _EditProductModalState extends State<EditProductModal> {
                     TextFormField(
                       controller: _productNameController,
                       decoration: const InputDecoration(labelText: 'Nama Product'),
+                      validator: (value) => value!.isEmpty ? 'Wajib diisi' : null,
+                    ),
+                    const SizedBox(height: 24),
+                    TextFormField(
+                      controller: _priceController,
+                      decoration: const InputDecoration(labelText: 'Default Price'),
                       validator: (value) => value!.isEmpty ? 'Wajib diisi' : null,
                     ),
                     const SizedBox(height: 24),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class EditReceiptModal extends StatefulWidget {
   final DocumentReference receiptRef;
@@ -18,6 +19,8 @@ class EditReceiptModal extends StatefulWidget {
 class _EditReceiptModalState extends State<EditReceiptModal> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _formNumberController = TextEditingController();
+  final TextEditingController _dateController = TextEditingController();
+  DateTime? _selectedDate;
 
   DocumentReference? _selectedSupplier;
   DocumentReference? _selectedWarehouse;
@@ -36,15 +39,31 @@ class _EditReceiptModalState extends State<EditReceiptModal> {
     _formNumberController.text = widget.receiptData['no_form'] ?? '';
     _selectedSupplier = widget.receiptData['supplier_ref'];
     _selectedWarehouse = widget.receiptData['warehouse_ref'];
+
+    if (widget.receiptData['updated_at'] != null) {
+    _selectedDate = (widget.receiptData['updated_at'] as Timestamp).toDate();
+    _dateController.text = _formatDate(_selectedDate!);
+  }
+
     _fetchDropdownData();
+  }
+  
+  String _formatDate(DateTime date) {
+    return "${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}";
   }
 
   Future<void> _fetchDropdownData() async {
-    final suppliers = await FirebaseFirestore.instance.collection('suppliers').get();
-    final warehouses = await FirebaseFirestore.instance.collection('warehouses').get();
-    final products = await FirebaseFirestore.instance.collection('products').get();
+    final prefs = await SharedPreferences.getInstance();
+    final storeRefPath = prefs.getString('store_ref');
+    if (storeRefPath == null) return;
+    final storeRef = FirebaseFirestore.instance.doc(storeRefPath);
+
+    final suppliers = await FirebaseFirestore.instance.collection('suppliers').where('store_ref', isEqualTo: storeRef).get();
+    final warehouses = await FirebaseFirestore.instance.collection('warehouses').where('store_ref', isEqualTo: storeRef).get();
+    final products = await FirebaseFirestore.instance.collection('products').where('store_ref', isEqualTo: storeRef).get();
     final detailsSnapshot = await widget.receiptRef.collection('details').get();
 
+    if (!mounted) return;
     setState(() {
       _suppliers = suppliers.docs;
       _warehouses = warehouses.docs;
@@ -60,7 +79,70 @@ class _EditReceiptModalState extends State<EditReceiptModal> {
     if (!_formKey.currentState!.validate() ||
         _selectedSupplier == null ||
         _selectedWarehouse == null ||
-        _productDetails.isEmpty) return;
+        _productDetails.isEmpty) {return;}
+
+    final detailsRef = widget.receiptRef.collection('details');
+    final firestore = FirebaseFirestore.instance;
+
+    final oldDetailsSnapshot = await detailsRef.get();
+    final oldQuantities = <String, int>{};
+
+    for (var doc in oldDetailsSnapshot.docs) {
+      final data = doc.data();
+      final productRef = (data['product_ref'] as DocumentReference).id;
+      final qty = (data['qty'] ?? 0);
+      oldQuantities[productRef] = (oldQuantities[productRef] ?? 0) + (qty as num).toInt();  
+    }
+
+    for (var doc in oldDetailsSnapshot.docs) {
+      await doc.reference.delete();
+    }
+
+    final newQuantities = <String, int>{};
+
+    for (var item in _productDetails) {
+      final refId = item.productRef!.id;
+      newQuantities[refId] = (newQuantities[refId] ?? 0) + item.qty;
+
+      await item.productRef!.update({'default_price': item.price});
+      await detailsRef.add(item.toMap());
+    }
+
+    for (var productRefId in {...oldQuantities.keys, ...newQuantities.keys}) {
+      final oldQty = oldQuantities[productRefId] ?? 0;
+      final newQty = newQuantities[productRefId] ?? 0;
+      final qtyDiff = newQty - oldQty;
+
+      final stockQuery = await firestore
+          .collection('stocks')
+          .where('product_ref', isEqualTo: firestore.doc('products/$productRefId'))
+          .where('warehouse_ref', isEqualTo: _selectedWarehouse)
+          .limit(1)
+          .get();
+
+      final productDocRef = firestore.doc('products/$productRefId');
+
+      if (stockQuery.docs.isNotEmpty) {
+        final stockDoc = stockQuery.docs.first.reference;
+        await firestore.runTransaction((transaction) async {
+          final snapshot = await transaction.get(stockDoc);
+          final currentQty = snapshot['qty'] ?? 0;
+          transaction.update(stockDoc, {'qty': currentQty + qtyDiff});
+        });
+      } else {
+        await firestore.collection('stocks').add({
+          'product_ref': firestore.doc('products/$productRefId'),
+          'warehouse_ref': _selectedWarehouse,
+          'qty': qtyDiff,
+        });
+      }
+      
+      await firestore.runTransaction((transaction) async {
+        final snapshot = await transaction.get(productDocRef);
+        final currentQty = snapshot['qty'] ?? 0;
+        transaction.update(productDocRef, {'qty': currentQty + qtyDiff});
+      });
+    }
 
     await widget.receiptRef.update({
       'no_form': _formNumberController.text.trim(),
@@ -71,16 +153,13 @@ class _EditReceiptModalState extends State<EditReceiptModal> {
       'updated_at': DateTime.now(),
     });
 
-    final detailsRef = widget.receiptRef.collection('details');
-    final existingDetails = await detailsRef.get();
-    for (var doc in existingDetails.docs) {
-      await doc.reference.delete();
-    }
-    for (var item in _productDetails) {
-      await detailsRef.add(item.toMap());
-    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text("Receipt berhasil diedit.")),
+    );
 
-    if(mounted){Navigator.pop(context, 'updated');}
+    if (mounted) {
+      Navigator.pop(context, 'updated');
+    }
   }
 
   void _removeProductRow(int index) {
