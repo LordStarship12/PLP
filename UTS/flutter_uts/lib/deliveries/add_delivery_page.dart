@@ -15,9 +15,9 @@ class _AddDeliveryPageState extends State<AddDeliveryPage> {
   DateTime? _selectedPostDate;
   final TextEditingController _postDateController = TextEditingController();
 
-  DocumentReference? _selectedSupplier;
+  DocumentReference? _selectedStore;
   DocumentReference? _selectedWarehouse;
-  List<DocumentSnapshot> _suppliers = [];
+  List<DocumentSnapshot> _stores = [];
   List<DocumentSnapshot> _warehouses = [];
   List<DocumentSnapshot> _products = [];
 
@@ -30,6 +30,7 @@ class _AddDeliveryPageState extends State<AddDeliveryPage> {
   void initState() {
     super.initState();
     _fetchDropdownData();
+    _generateFormNumber();
   }
 
   Future<void> _fetchDropdownData() async {
@@ -38,58 +39,112 @@ class _AddDeliveryPageState extends State<AddDeliveryPage> {
     if (storeRefPath == null) return;
     final storeRef = FirebaseFirestore.instance.doc(storeRefPath);
 
-    final suppliers = await FirebaseFirestore.instance.collection('suppliers').where('store_ref', isEqualTo: storeRef).get();
+    final storesQuery = await FirebaseFirestore.instance.collection('stores').get();
+    final stores = storesQuery.docs.where((doc) => doc.reference.path != storeRef.path).toList();
+
     final warehouses = await FirebaseFirestore.instance.collection('warehouses').where('store_ref', isEqualTo: storeRef).get();
     final products = await FirebaseFirestore.instance.collection('products').where('store_ref', isEqualTo: storeRef).get();
 
+    final generatedFormNo = await _generateFormNumber(); 
+    
     setState(() {
-      _suppliers = suppliers.docs;
+      _stores = stores;
       _warehouses = warehouses.docs;
       _products = products.docs;
+      _formNumberController.text = generatedFormNo;
     });
   }
 
-  Future<void> _saveReceipt() async {
+  Future<String> _generateFormNumber() async {
+    final receipts = await FirebaseFirestore.instance
+        .collection('deliveries')
+        .orderBy('created_at', descending: true)
+        .get(); 
+
+    int maxNumber = 0;
+    final base = 'TTJ22100034';
+
+    for (var doc in receipts.docs) {
+      final lastForm = doc['no_form'];
+      final parts = lastForm.split('_');
+      if (parts.length == 2) {
+        final number = int.tryParse(parts[1]) ?? 0;
+        if (number > maxNumber) {
+          maxNumber = number;
+        }
+      }
+    }
+
+    final nextNumber = maxNumber + 1;
+    return '${base}_$nextNumber';
+  }
+
+  Future<void> _saveDelivery() async {
     if (!_formKey.currentState!.validate() ||
-        _selectedSupplier == null ||
+        _selectedStore == null ||
         _selectedWarehouse == null ||
-        _productDetails.isEmpty) {return;}
-        
+        _productDetails.isEmpty) {
+      return;
+    }
+
     final prefs = await SharedPreferences.getInstance();
     final storeRefPath = prefs.getString('store_ref');
     if (storeRefPath == null) return;
     final storeRef = FirebaseFirestore.instance.doc(storeRefPath);
 
-    final receiptData = {
+    final deliveryData = {
       'no_form': _formNumberController.text.trim(),
       'grandtotal': grandTotal,
       'item_total': itemTotal,
       'post_date': _selectedPostDate?.toIso8601String() ?? DateTime.now().toIso8601String(),
       'created_at': DateTime.now(),
       'store_ref': storeRef,
-      'supplier_ref': _selectedSupplier,
+      'destination_store_ref': _selectedStore,
       'warehouse_ref': _selectedWarehouse,
       'synced': true,
     };
 
-    final receiptDoc = await FirebaseFirestore.instance.collection('purchaseGoodsReceipts').add(receiptData);
+    final deliveryDoc = await FirebaseFirestore.instance.collection('deliveries').add(deliveryData);
 
     for (final item in _productDetails) {
-      await receiptDoc.collection('details').add(item.toMap());
-    
-      if (item.productRef != null) {
+      await deliveryDoc.collection('details').add(item.toMap());
+
+      if (item.productRef != null && _selectedWarehouse != null) {
+        final stockQuery = await FirebaseFirestore.instance
+            .collection('stocks')
+            .where('product_ref', isEqualTo: item.productRef)
+            .where('warehouse_ref', isEqualTo: _selectedWarehouse)
+            .limit(1)
+            .get();
+
+        if (stockQuery.docs.isNotEmpty) {
+          final stockDoc = stockQuery.docs.first;
+          final stockRef = stockDoc.reference;
+          final stockData = stockDoc.data();
+          final stockQty = stockData['qty'] ?? 0;
+
+          if (stockQty == item.qty) {
+            await stockRef.delete();
+          } else if (stockQty > item.qty) {
+            await stockRef.update({'qty': stockQty - item.qty});
+          } else {
+            print('Warning: Stock qty (${stockQty}) < delivery qty (${item.qty}) for product ${item.productRef!.id}');
+          }
+        } else {
+          print('Warning: No stock found for product ${item.productRef!.id} in selected warehouse');
+        }
+
         final productSnap = await item.productRef!.get();
         final currentQty = productSnap['qty'] ?? 0;
         await item.productRef!.update({
-          'qty': currentQty + item.qty,
+          'qty': currentQty - item.qty,
         });
       }
     }
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text("Receipt berhasil ditambah.")),
+      SnackBar(content: Text("Delivery berhasil ditambah.")),
     );
-
 
     if (mounted) Navigator.pop(context);
   }
@@ -125,7 +180,7 @@ class _AddDeliveryPageState extends State<AddDeliveryPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Tambah Receipt')),
+      appBar: AppBar(title: Text('Tambah Delivery')),
       body: _products.isEmpty
           ? Center(child: CircularProgressIndicator())
           : Padding(
@@ -137,19 +192,19 @@ class _AddDeliveryPageState extends State<AddDeliveryPage> {
                     TextFormField(
                       controller: _formNumberController,
                       decoration: InputDecoration(labelText: 'No. Form'),
-                      validator: (value) => value!.isEmpty ? 'Wajib diisi' : null,
+                      readOnly: true,
                     ),
                     SizedBox(height: 16),
                     DropdownButtonFormField<DocumentReference>(
-                      items: _suppliers.map((doc) {
+                      items: _stores.map((doc) {
                         return DropdownMenuItem(
                           value: doc.reference,
                           child: Text(doc['name']),
                         );
                       }).toList(),
-                      onChanged: (value) => setState(() => _selectedSupplier = value),
-                      decoration: InputDecoration(labelText: "Supplier"),
-                      validator: (value) => value == null ? 'Pilih supplier' : null,
+                      onChanged: (value) => setState(() => _selectedStore = value),
+                      decoration: InputDecoration(labelText: "Store Tujuan"),
+                      validator: (value) => value == null ? 'Pilih store' : null,
                     ),
                     DropdownButtonFormField<DocumentReference>(
                       items: _warehouses.map((doc) {
@@ -159,7 +214,7 @@ class _AddDeliveryPageState extends State<AddDeliveryPage> {
                         );
                       }).toList(),
                       onChanged: (value) => setState(() => _selectedWarehouse = value),
-                      decoration: InputDecoration(labelText: "Warehouse"),
+                      decoration: InputDecoration(labelText: "Warehouse Asal"),
                       validator: (value) => value == null ? 'Pilih warehouse' : null,
                     ),
                     SizedBox(height: 24),
@@ -190,12 +245,32 @@ class _AddDeliveryPageState extends State<AddDeliveryPage> {
                                     child: Text(doc['name']),
                                   );
                                 }).toList(),
-                                onChanged: (value) {
+                                onChanged: (value) async {
                                   setState(() {
                                     item.productRef = value;
                                     item.unitName = 'pcs';
                                     item.unitController.text = item.unitName;
+                                    item.availableStock = 0;
                                   });
+                                
+                                  if (value != null && _selectedWarehouse != null) {
+                                    final stockQuery = await FirebaseFirestore.instance
+                                        .collection('stocks')
+                                        .where('product_ref', isEqualTo: value)
+                                        .where('warehouse_ref', isEqualTo: _selectedWarehouse)
+                                        .limit(1)
+                                        .get();
+                                
+                                    int stockQty = 0;
+                                    if (stockQuery.docs.isNotEmpty) {
+                                      final stockData = stockQuery.docs.first.data();
+                                      stockQty = stockData['qty'] ?? 0;
+                                    }
+                                
+                                    setState(() {
+                                      item.availableStock = stockQty;
+                                    });
+                                  }
                                 },
                                 decoration: InputDecoration(labelText: "Produk"),
                                 validator: (value) => value == null ? 'Pilih produk' : null,
@@ -211,12 +286,28 @@ class _AddDeliveryPageState extends State<AddDeliveryPage> {
                               ),
                               TextFormField(
                                 initialValue: item.qty.toString(),
-                                decoration: InputDecoration(labelText: "Jumlah"),
+                                decoration: InputDecoration(
+                                  labelText: "Jumlah",
+                                  suffixText: "/ Stok: ${item.availableStock}",
+                                ),
                                 keyboardType: TextInputType.number,
-                                onChanged: (val) => setState(() {
-                                  item.qty = int.tryParse(val) ?? 1;
-                                }),
-                                validator: (val) => val!.isEmpty ? 'Wajib diisi' : null,
+                                onChanged: (val) {
+                                  final inputQty = int.tryParse(val) ?? 1;
+                                  setState(() {
+                                    item.qty = inputQty;
+                                  });
+                                  if (inputQty > item.availableStock) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text("Qty melebihi stok tersedia!")),
+                                    );
+                                  }
+                                },
+                                validator: (val) {
+                                  final inputQty = int.tryParse(val ?? '') ?? 0;
+                                  if (val!.isEmpty) return 'Wajib diisi';
+                                  if (inputQty > item.availableStock) return 'Qty melebihi stok';
+                                  return null;
+                                },
                               ),
                               SizedBox(height: 8),
                               Text("Subtotal: ${item.subtotal}"),
@@ -241,8 +332,8 @@ class _AddDeliveryPageState extends State<AddDeliveryPage> {
                     Text("Grand Total: $grandTotal"),
                     SizedBox(height: 24),
                     ElevatedButton(
-                      onPressed: _saveReceipt,
-                      child: Text('Simpan Receipt'),
+                      onPressed: _saveDelivery,
+                      child: Text('Simpan Delivery'),
                     ),
                   ],
                 ),
@@ -257,6 +348,7 @@ class _DetailItem {
   int price = 0;
   int qty = 1;
   String unitName = 'unit';
+  int availableStock = 0;
   TextEditingController unitController = TextEditingController();
   final List<DocumentSnapshot> products;
 

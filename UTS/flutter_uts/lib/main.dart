@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter_uts/deliveries/edit_delivery_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 
+import 'deliveries/add_delivery_page.dart';
 import 'products/add_product_page.dart';
 import 'products/edit_product_page.dart';
 import 'receipts/add_receipt_page.dart';
@@ -64,6 +66,7 @@ class _MainScaffoldState extends State<MainScaffold> {
   int _selectedIndex = 0;
   final List<Widget> _pages = [
     const ReceiptListPage(),
+    const DeliveryListPage(),
     const SuppliersPage(),
     const WarehousesPage(),
     const ProductsPage(),
@@ -84,6 +87,7 @@ class _MainScaffoldState extends State<MainScaffold> {
         onTap: _onItemTapped,
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.receipt), label: 'Receipts'),
+          BottomNavigationBarItem(icon: Icon(Icons.local_shipping), label: 'Delivery'),
           BottomNavigationBarItem(icon: Icon(Icons.store), label: 'Suppliers'),
           BottomNavigationBarItem(icon: Icon(Icons.warehouse), label: 'Warehouses'),
           BottomNavigationBarItem(icon: Icon(Icons.inventory), label: 'Products'),
@@ -118,6 +122,8 @@ class _ReceiptListPageState extends State<ReceiptListPage> {
     if (storeRefPath == null || storeRefPath.isEmpty) return;
 
     final storeRef = FirebaseFirestore.instance.doc(storeRefPath);
+    print('storeRefPath: $storeRefPath');
+    print('storeRef: ${storeRef.path}');
     final receiptsSnapshot = await FirebaseFirestore.instance
         .collection('purchaseGoodsReceipts')
         .where('store_ref', isEqualTo: storeRef)
@@ -372,98 +378,281 @@ class _ReceiptListPageState extends State<ReceiptListPage> {
   }
 }                          
 
-// class ReceiptDetailsPage extends StatefulWidget {
-//   const ReceiptDetailsPage({super.key});
+class DeliveryListPage extends StatefulWidget {
+  const DeliveryListPage({super.key});
 
-//   @override
-//   State<ReceiptDetailsPage> createState() => _ReceiptDetailsPageState();
-// }
+  @override
+  State<DeliveryListPage> createState() => _DeliveryListPageState();
+}
 
-// class _ReceiptDetailsPageState extends State<ReceiptDetailsPage> {
-//   List<DocumentSnapshot> _allDetails = [];
-//   bool _loading = true;
+class _DeliveryListPageState extends State<DeliveryListPage> {
+  List<DocumentSnapshot> _allDeliveries = [];
+  final Map<String, List<DocumentSnapshot>> _detailsMap = {};
+  final Set<String> _expandedDeliveries = {};
+  bool _loading = true;
 
-//   @override
-//   void initState() {
-//     super.initState();
-//     _loadDetailsForStore();
-//   }
+  @override
+  void initState() {
+    super.initState();
+    _loadDeliveriesForStore();
+  }
 
-//   Future<void> _loadDetailsForStore() async {
-//     final prefs = await SharedPreferences.getInstance();
-//     final storeRefPath = prefs.getString('store_ref');
-//     if (storeRefPath == null || storeRefPath.isEmpty) return;
+  Future<void> _loadDeliveriesForStore() async {
+    final prefs = await SharedPreferences.getInstance();
+    final storeRefPath = prefs.getString('store_ref');
+    if (storeRefPath == null || storeRefPath.isEmpty) return;
 
-//     final storeRef = FirebaseFirestore.instance.doc(storeRefPath);
-//     final receiptsSnapshot = await FirebaseFirestore.instance
-//         .collection('purchaseGoodsReceipts')
-//         .where('store_ref', isEqualTo: storeRef)
-//         .get();
+    final storeRef = FirebaseFirestore.instance.doc(storeRefPath);
+    final deliveriesSnapshot = await FirebaseFirestore.instance
+        .collection('deliveries')
+        .where('store_ref', isEqualTo: storeRef)
+        .get();
 
-//     List<DocumentSnapshot> allDetails = [];
+    setState(() {
+      _allDeliveries = deliveriesSnapshot.docs;
+      _loading = false;
+    });
+  }
 
-//     for (var receipt in receiptsSnapshot.docs) {
-//       final detailsSnapshot = await receipt.reference.collection('details').get();
-//       allDetails.addAll(detailsSnapshot.docs);
-//     }
+  Future<List<String>> _resolveReferences(
+    DocumentReference? storeRef,
+    DocumentReference? storeRefTo,
+    DocumentReference? warehouseRef,
+  ) async {
+    final refs = [storeRef, storeRefTo, warehouseRef];
+    final names = await Future.wait(refs.map((ref) async {
+      if (ref == null) return 'Unknown';
+      try {
+        final doc = await ref.get();
+        final data = doc.data() as Map<String, dynamic>?;
+        return data?['name']?.toString() ?? 'Unnamed';
+      } catch (e) {
+        return 'Error';
+      }
+    }).cast<Future<String>>());
 
-//     setState(() {
-//       _allDetails = allDetails;
-//       _loading = false;
-//     });
-//   }
+    return names;
+  }
 
-//   Future<String> _resolveReference(DocumentReference? ref) async {
-//     if (ref == null) return 'Unknown';
-//     try {
-//       final doc = await ref.get();
-//       final data = doc.data() as Map<String, dynamic>?;
-//       return data?['name']?.toString() ?? 'Unnamed';
-//     } catch (e) {
-//       return 'Error';
-//     }
-//   }
+  Future<void> _toggleDetails(String deliveryId, DocumentReference deliveryRef) async {
+    if (_expandedDeliveries.contains(deliveryId)) {
+      setState(() {
+        _expandedDeliveries.remove(deliveryId);
+      });
+      return;
+    }
 
+    if (!_detailsMap.containsKey(deliveryId)) {
+      final detailSnapshot = await deliveryRef.collection('details').get();
+      _detailsMap[deliveryId] = detailSnapshot.docs;
+    }
 
-//   @override
-//   Widget build(BuildContext context) {
-//     return Scaffold(
-//       appBar: AppBar(title: const Text('Receipt Details')),
-//       body: _loading
-//           ? const Center(child: Text('Masukkan kode dan nama toko terlebih dahulu.'))
-//           : _allDetails.isEmpty
-//               ? const Center(child: Text('Tidak ada detail produk.'))
-//               : ListView.builder(
-//                   itemCount: _allDetails.length,
-//                   itemBuilder: (context, index) {
-//                     final data = _allDetails[index].data() as Map<String, dynamic>;
-//                     return FutureBuilder<String>(
-//                       future: _resolveReference(data['product_ref']),
-//                       builder: (context, snapshot) {
-//                         final productName = snapshot.data ?? 'Loading...';
-//                         return Card(
-//                           margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-//                           child: Padding(
-//                             padding: const EdgeInsets.all(12),
-//                             child: Column(
-//                               crossAxisAlignment: CrossAxisAlignment.start,
-//                               children: [
-//                                 Text("Product: $productName"),
-//                                 Text("Qty: ${data['qty']}"),
-//                                 Text("Unit: ${data['unit_name']}"),
-//                                 Text("Price: ${data['price']}"),
-//                                 Text("Subtotal: ${data['subtotal']}"),
-//                               ],
-//                             ),
-//                           ),
-//                         );
-//                       },
-//                     );
-//                   },
-//                 ),
-//     );
-//   }
-// }
+    setState(() {
+      _expandedDeliveries.add(deliveryId);
+    });
+  }
+
+  Future<String> _resolveProductName(DocumentReference? ref) async {
+    if (ref == null) return 'Unknown';
+    try {
+      final doc = await ref.get();
+      final data = doc.data() as Map<String, dynamic>?;
+      return data?['name'] ?? 'Unnamed';
+    } catch (e) {
+      return 'Error';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Deliveries')),
+      body: _loading
+          ? const Center(child: Text('Masukkan kode dan nama toko terlebih dahulu.'))
+          : _allDeliveries.isEmpty
+              ? const Center(child: Text('Tidak ada delivery.'))
+              : ListView.builder(
+                  itemCount: _allDeliveries.length,
+                  itemBuilder: (context, index) {
+                    final document = _allDeliveries[index];
+                    final data = document.data() as Map<String, dynamic>;
+                    final deliveryId = document.id;
+                    final postDate = DateTime.tryParse(data['post_date'] ?? '') ??
+                        (data['created_at'] as Timestamp).toDate();
+
+                    return FutureBuilder<List<String>>(
+                      future: _resolveReferences(
+                        data['store_ref'],
+                        data['destination_store_ref'],
+                        data['warehouse_ref'],
+                      ),
+                      builder: (context, snapshot) {
+                        final refNames = snapshot.data ?? ['Loading...', 'Loading...', 'Loading...'];
+                        return Card(
+                          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text("No. Form: ${data['no_form']}", style: const TextStyle(fontWeight: FontWeight.bold)),
+                                Text("Post Date: ${DateFormat('yyyy-MM-dd').format(postDate)}"),
+                                Text("Grand Total: ${rupiahFormat.format(data['grandtotal'])}"),
+                                Text("Item Total: ${data['item_total']}"),
+                                Text("Store Asal: ${refNames[0]}"),
+                                Text("Store Tujuan: ${refNames[1]}"),
+                                Text("Warehouse: ${refNames[2]}"),
+                                Text("Synced: ${data['synced'] ? 'Yes' : 'No'}"),
+                                Text("Created At: ${(data['created_at'] as Timestamp).toDate()}"),
+                                const SizedBox(height: 12),
+                                Row(
+                                  children: [
+                                    ElevatedButton(
+                                      onPressed: () => _toggleDetails(deliveryId, document.reference),
+                                      child: Text(_expandedDeliveries.contains(deliveryId) ? 'Sembunyikan Detail' : 'Lihat Detail'),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    IconButton(
+                                      icon: const Icon(Icons.edit, color: Colors.blue),
+                                      onPressed: () async {
+                                        final result = await showModalBottomSheet(
+                                          context: context,
+                                          isScrollControlled: true,
+                                          builder: (_) => EditDeliveryModal(
+                                            deliveryRef: document.reference,
+                                            deliveryData: data,
+                                          ),
+                                        );
+                                        if (result == 'updated') {
+                                          await _loadDeliveriesForStore();
+                                        }
+                                      },
+                                    ),
+                                    const SizedBox(width: 8),
+                                    IconButton(
+                                      icon: const Icon(Icons.delete, color: Colors.red),
+                                      onPressed: () async {
+                                        final confirmed = await showDialog<bool>(
+                                          context: context,
+                                          builder: (context) => AlertDialog(
+                                            title: const Text('Hapus Delivery?'),
+                                            content: const Text('Apakah Anda yakin ingin menghapus delivery ini?'),
+                                            actions: [
+                                              TextButton(
+                                                onPressed: () => Navigator.pop(context, false),
+                                                child: const Text('Batal'),
+                                              ),
+                                              TextButton(
+                                                onPressed: () => Navigator.pop(context, true),
+                                                child: const Text('Hapus'),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                        if (confirmed == true) {
+                                          final detailsSnapshot = await document.reference.collection('details').get();
+
+                                          for (var detailDoc in detailsSnapshot.docs) {
+                                            final detailData = detailDoc.data();
+                                            final productRef = detailData['product_ref'] as DocumentReference?;
+                                            final warehouseRef = detailData['warehouse_ref'] as DocumentReference? ?? data['warehouse_ref'];
+                                            final qty = detailData['qty'];
+
+                                            if (productRef != null && warehouseRef != null && qty != null) {
+                                              final stockQuery = await FirebaseFirestore.instance
+                                                  .collection('stocks')
+                                                  .where('product_ref', isEqualTo: productRef)
+                                                  .where('warehouse_ref', isEqualTo: warehouseRef)
+                                                  .limit(1)
+                                                  .get();
+
+                                              if (stockQuery.docs.isNotEmpty) {
+                                                final stockDoc = stockQuery.docs.first;
+                                                final stockRef = stockDoc.reference;
+                                                final stockData = stockDoc.data();
+                                                final stockQty = stockData['qty'] ?? 0;
+
+                                                await stockRef.update({'qty': stockQty + qty});
+                                              } else {
+                                                await FirebaseFirestore.instance.collection('stocks').add({
+                                                  'product_ref': productRef,
+                                                  'warehouse_ref': warehouseRef,
+                                                  'qty': qty,
+                                                });
+                                              }
+
+                                              await FirebaseFirestore.instance.runTransaction((transaction) async {
+                                                final productSnap = await transaction.get(productRef);
+                                                final productData = productSnap.data() as Map<String, dynamic>?;
+                                                final currentQty = productData?['qty'] ?? 0;
+                                                transaction.update(productRef, {
+                                                  'qty': currentQty + qty,
+                                                });
+                                              });
+                                            }
+
+                                            await detailDoc.reference.delete();
+                                          }
+
+                                          await document.reference.delete();
+                                          await _loadDeliveriesForStore();
+                                        }
+                                      },
+                                    ),
+                                  ],
+                                ),
+                                if (_expandedDeliveries.contains(deliveryId))
+                                  Column(
+                                    children: _detailsMap[deliveryId]?.map((detailDoc) {
+                                          final detail = detailDoc.data() as Map<String, dynamic>;
+                                          return FutureBuilder<String>(
+                                            future: _resolveProductName(detail['product_ref']),
+                                            builder: (context, snapshot) {
+                                              final productName = snapshot.data ?? 'Loading...';
+                                              return ListTile(
+                                                title: Text(productName),
+                                                subtitle: Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    Text("Qty: ${detail['qty']} ${detail['unit_name']}"),
+                                                    Text("Price: ${rupiahFormat.format(detail['price'])}"),
+                                                    Text("Subtotal: ${rupiahFormat.format(detail['subtotal'])}"),
+                                                  ],
+                                                ),
+                                              );
+                                            },
+                                          );
+                                        }).toList() ??
+                                        [const Text('Tidak ada detail')],
+                                  ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
+      floatingActionButton: Column(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          const SizedBox(height: 10),
+          ElevatedButton(
+            onPressed: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => AddDeliveryPage()), 
+              );
+              await _loadDeliveriesForStore();
+            },
+            child: const Text('Tambah Delivery'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 
 class SuppliersPage extends StatefulWidget {
   const SuppliersPage({super.key});
@@ -744,7 +933,10 @@ class _WarehousesPage extends State<WarehousesPage> {
                                       ),
                                     );
                                     if (confirmed == true) {
-                                      final stocksSnapshot = await document.reference.collection('stocks').get();
+                                      final stocksSnapshot = await FirebaseFirestore.instance
+                                          .collection('stocks')
+                                          .where('warehouse_ref', isEqualTo: document.reference)
+                                          .get();
 
                                       for (var stockDoc in stocksSnapshot.docs) {
                                         final stockData = stockDoc.data();
@@ -824,7 +1016,6 @@ class _WarehousesPage extends State<WarehousesPage> {
     );
   }
 }
-
 
 class ProductsPage extends StatefulWidget {
   const ProductsPage({super.key});
