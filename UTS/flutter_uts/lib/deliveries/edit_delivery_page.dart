@@ -3,13 +3,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class EditDeliveryModal extends StatefulWidget {
-  final DocumentReference deliveryRef;
-  final Map<String, dynamic> deliveryData;
+  final DocumentReference invoiceRef;
+  final Map<String, dynamic> invoiceData;
 
   const EditDeliveryModal({
     super.key,
-    required this.deliveryRef,
-    required this.deliveryData,
+    required this.invoiceRef,
+    required this.invoiceData,
   });
 
   @override
@@ -19,37 +19,48 @@ class EditDeliveryModal extends StatefulWidget {
 class _EditDeliveryModalState extends State<EditDeliveryModal> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _formNumberController = TextEditingController();
-  final TextEditingController _dateController = TextEditingController();
-  DateTime? _selectedDate;
+  final TextEditingController _postDateController = TextEditingController();
+  final TextEditingController _keteranganController = TextEditingController();
+  final TextEditingController _descriptionController = TextEditingController();
 
+  DateTime? _selectedPostDate;
   DocumentReference? _selectedDestinationStore;
   DocumentReference? _selectedWarehouse;
   List<DocumentSnapshot> _stores = [];
   List<DocumentSnapshot> _warehouses = [];
   List<DocumentSnapshot> _products = [];
-
   final List<_DetailItem> _productDetails = [];
+
+  bool _isCredit = false;
+  int _creditDuration = 3;
+  bool _isPaid = false;
 
   int get itemTotal => _productDetails.fold(0, (sum, item) => sum + item.qty);
   int get grandTotal => _productDetails.fold(0, (sum, item) => sum + item.subtotal);
+  double get installmentPerMonth => _isCredit ? grandTotal / _creditDuration : 0;
 
   @override
   void initState() {
     super.initState();
-    _formNumberController.text = widget.deliveryData['no_form'] ?? '';
-    _selectedDestinationStore = widget.deliveryData['destination_store_ref'];
-    _selectedWarehouse = widget.deliveryData['warehouse_ref'];
+    _formNumberController.text = widget.invoiceData['no_faktur'] ?? '';
+    _selectedDestinationStore = widget.invoiceData['customer_store_ref'];
+    _selectedWarehouse = widget.invoiceData['warehouse_ref'];
+    _isCredit = widget.invoiceData['is_credit'] ?? false;
+    _creditDuration = widget.invoiceData['credit_duration'] ?? 3;
+    _isPaid = widget.invoiceData['is_paid'] ?? false;
+    _keteranganController.text = widget.invoiceData['keterangan'] ?? '';
+    _descriptionController.text = widget.invoiceData['description'] ?? '';
 
-    if (widget.deliveryData['updated_at'] != null) {
-      _selectedDate = (widget.deliveryData['updated_at'] as Timestamp).toDate();
-      _dateController.text = _formatDate(_selectedDate!);
+    final postDateStr = widget.invoiceData['post_date'];
+    if (postDateStr != null) {
+      _selectedPostDate = DateTime.tryParse(postDateStr);
+      if (_selectedPostDate != null) {
+        _postDateController.text =
+            "${_selectedPostDate!.year}-${_selectedPostDate!.month.toString().padLeft(2, '0')}-${_selectedPostDate!.day.toString().padLeft(2, '0')}";
+      }
     }
 
     _fetchDropdownData();
-  }
-
-  String _formatDate(DateTime date) {
-    return "${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}";
   }
 
   Future<void> _fetchDropdownData() async {
@@ -61,7 +72,7 @@ class _EditDeliveryModalState extends State<EditDeliveryModal> {
     final stores = await FirebaseFirestore.instance.collection('stores').get();
     final warehouses = await FirebaseFirestore.instance.collection('warehouses').where('store_ref', isEqualTo: storeRef).get();
     final products = await FirebaseFirestore.instance.collection('products').where('store_ref', isEqualTo: storeRef).get();
-    final detailsSnapshot = await widget.deliveryRef.collection('details').get();
+    final detailsSnapshot = await widget.invoiceRef.collection('details').get();
 
     if (!mounted) return;
     setState(() {
@@ -75,13 +86,29 @@ class _EditDeliveryModalState extends State<EditDeliveryModal> {
     });
   }
 
-  void _updateDelivery() async {
+  Future<void> _selectPostDate(BuildContext context) async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedPostDate ?? DateTime.now(),
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+
+    if (picked != null) {
+      setState(() {
+        _selectedPostDate = picked;
+        _postDateController.text = "${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}";
+      });
+    }
+  }
+
+  Future<void> _updateInvoice() async {
     if (!_formKey.currentState!.validate() ||
         _selectedDestinationStore == null ||
         _selectedWarehouse == null ||
-        _productDetails.isEmpty) {return;}
+        _productDetails.isEmpty) return;
 
-    final detailsRef = widget.deliveryRef.collection('details');
+    final detailsRef = widget.invoiceRef.collection('details');
     final firestore = FirebaseFirestore.instance;
 
     final oldDetailsSnapshot = await detailsRef.get();
@@ -91,7 +118,7 @@ class _EditDeliveryModalState extends State<EditDeliveryModal> {
       final data = doc.data();
       final productRef = (data['product_ref'] as DocumentReference).id;
       final qty = (data['qty'] ?? 0);
-      oldQuantities[productRef] = (oldQuantities[productRef] ?? 0) + (qty as num).toInt();  
+      oldQuantities[productRef] = (oldQuantities[productRef] ?? 0) + (qty as num).toInt();
     }
 
     for (var doc in oldDetailsSnapshot.docs) {
@@ -99,11 +126,9 @@ class _EditDeliveryModalState extends State<EditDeliveryModal> {
     }
 
     final newQuantities = <String, int>{};
-
     for (var item in _productDetails) {
       final refId = item.productRef!.id;
       newQuantities[refId] = (newQuantities[refId] ?? 0) + item.qty;
-
       await item.productRef!.update({'default_price': item.price});
       await detailsRef.add(item.toMap());
     }
@@ -127,35 +152,38 @@ class _EditDeliveryModalState extends State<EditDeliveryModal> {
         await firestore.runTransaction((transaction) async {
           final snapshot = await transaction.get(stockDoc);
           final currentQty = snapshot['qty'] ?? 0;
-          transaction.update(stockDoc, {'qty': currentQty - qtyDiff}); // <== SUBTRACTION
+          transaction.update(stockDoc, {'qty': currentQty - qtyDiff});
         });
       } else {
         await firestore.collection('stocks').add({
           'product_ref': firestore.doc('products/$productRefId'),
           'warehouse_ref': _selectedWarehouse,
-          'qty': -qtyDiff, // <== SUBTRACTION
+          'qty': -qtyDiff,
         });
       }
-      
+
       await firestore.runTransaction((transaction) async {
         final snapshot = await transaction.get(productDocRef);
         final currentQty = snapshot['qty'] ?? 0;
-        transaction.update(productDocRef, {'qty': currentQty - qtyDiff}); // <== SUBTRACTION
+        transaction.update(productDocRef, {'qty': currentQty - qtyDiff});
       });
     }
 
-    await widget.deliveryRef.update({
-      'no_form': _formNumberController.text.trim(),
-      'destination_store_ref': _selectedDestinationStore,
+    await widget.invoiceRef.update({
+      'no_faktur': _formNumberController.text.trim(),
+      'customer_store_ref': _selectedDestinationStore,
       'warehouse_ref': _selectedWarehouse,
       'item_total': itemTotal,
       'grandtotal': grandTotal,
+      'is_credit': _isCredit,
+      'credit_duration': _isCredit ? _creditDuration : 0,
+      'installment': _isCredit ? installmentPerMonth : 0,
+      'is_paid': _isPaid,
+      'post_date': _selectedPostDate?.toIso8601String(),
+      'keterangan': _keteranganController.text.trim(),
+      'description': _descriptionController.text.trim(),
       'updated_at': DateTime.now(),
     });
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text("Delivery berhasil diedit.")),
-    );
 
     if (mounted) {
       Navigator.pop(context, 'updated');
@@ -173,7 +201,7 @@ class _EditDeliveryModalState extends State<EditDeliveryModal> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Edit Delivery')),
+      appBar: AppBar(title: Text('Edit Sales Invoice')),
       body: _products.isEmpty
           ? Center(child: CircularProgressIndicator())
           : Padding(
@@ -184,7 +212,7 @@ class _EditDeliveryModalState extends State<EditDeliveryModal> {
                   children: [
                     TextFormField(
                       controller: _formNumberController,
-                      decoration: InputDecoration(labelText: 'No. Form'),
+                      decoration: InputDecoration(labelText: 'No. Faktur'),
                       validator: (value) => value!.isEmpty ? 'Wajib diisi' : null,
                     ),
                     DropdownButtonFormField<DocumentReference>(
@@ -196,8 +224,8 @@ class _EditDeliveryModalState extends State<EditDeliveryModal> {
                         );
                       }).toList(),
                       onChanged: (value) => setState(() => _selectedDestinationStore = value),
-                      decoration: InputDecoration(labelText: 'Tujuan Toko'),
-                      validator: (value) => value == null ? 'Pilih tujuan toko' : null,
+                      decoration: InputDecoration(labelText: 'Store (Customer)'),
+                      validator: (value) => value == null ? 'Pilih store' : null,
                     ),
                     DropdownButtonFormField<DocumentReference>(
                       value: _selectedWarehouse,
@@ -208,12 +236,53 @@ class _EditDeliveryModalState extends State<EditDeliveryModal> {
                         );
                       }).toList(),
                       onChanged: (value) => setState(() => _selectedWarehouse = value),
-                      decoration: InputDecoration(labelText: 'Warehouse'),
+                      decoration: InputDecoration(labelText: 'Warehouse Asal'),
                       validator: (value) => value == null ? 'Pilih warehouse' : null,
                     ),
-                    SizedBox(height: 24),
+                    SizedBox(height: 16),
+                    TextFormField(
+                      controller: _postDateController,
+                      readOnly: true,
+                      decoration: InputDecoration(labelText: 'Tanggal Post'),
+                      onTap: () => _selectPostDate(context),
+                      validator: (value) => value == null || value.isEmpty ? 'Pilih tanggal' : null,
+                    ),
+                    CheckboxListTile(
+                      value: _isCredit,
+                      onChanged: (val) => setState(() => _isCredit = val!),
+                      title: Text("Credit?"),
+                    ),
+                    if (_isCredit)
+                      DropdownButtonFormField<int>(
+                        value: _creditDuration,
+                        items: [3, 6, 12].map((month) {
+                          return DropdownMenuItem(
+                            value: month,
+                            child: Text("$month bulan"),
+                          );
+                        }).toList(),
+                        onChanged: (val) => setState(() => _creditDuration = val!),
+                        decoration: InputDecoration(labelText: "Durasi Kredit"),
+                      ),
+                    if (_isCredit)
+                      Text("Cicilan per bulan: ${installmentPerMonth.toStringAsFixed(2)}"),
+                    CheckboxListTile(
+                      value: _isPaid,
+                      onChanged: (val) => setState(() => _isPaid = val!),
+                      title: Text("Sudah Lunas?"),
+                    ),
+                    TextFormField(
+                      controller: _keteranganController,
+                      maxLines: 3,
+                      decoration: InputDecoration(labelText: 'Keterangan'),
+                    ),
+                    TextFormField(
+                      controller: _descriptionController,
+                      maxLines: 3,
+                      decoration: InputDecoration(labelText: 'Description'),
+                    ),
+                    SizedBox(height: 16),
                     Text("Detail Produk", style: TextStyle(fontWeight: FontWeight.bold)),
-                    SizedBox(height: 8),
                     ..._productDetails.asMap().entries.map((entry) {
                       final index = entry.key;
                       final item = entry.value;
@@ -231,10 +300,7 @@ class _EditDeliveryModalState extends State<EditDeliveryModal> {
                                     child: Text(doc['name']),
                                   );
                                 }).toList(),
-                                onChanged: (value) => setState(() {
-                                  item.productRef = value;
-                                  item.unitName = value!.id == '1' ? 'pcs' : 'dus';
-                                }),
+                                onChanged: (value) => setState(() => item.productRef = value),
                                 decoration: InputDecoration(labelText: "Produk"),
                                 validator: (value) => value == null ? 'Pilih produk' : null,
                               ),
@@ -257,7 +323,6 @@ class _EditDeliveryModalState extends State<EditDeliveryModal> {
                                 validator: (val) => val!.isEmpty ? 'Wajib diisi' : null,
                               ),
                               SizedBox(height: 8),
-                              Text("Satuan: ${item.unitName}"),
                               Text("Subtotal: ${item.subtotal}"),
                               SizedBox(height: 4),
                               TextButton.icon(
@@ -280,8 +345,8 @@ class _EditDeliveryModalState extends State<EditDeliveryModal> {
                     Text("Grand Total: $grandTotal"),
                     SizedBox(height: 24),
                     ElevatedButton(
-                      onPressed: _updateDelivery,
-                      child: Text('Update Delivery'),
+                      onPressed: _updateInvoice,
+                      child: Text('Update Sales Invoice'),
                     ),
                   ],
                 ),
@@ -295,25 +360,16 @@ class _DetailItem {
   DocumentReference? productRef;
   int price;
   int qty;
-  String unitName;
   final List<DocumentSnapshot> products;
   final DocumentReference? docRef;
 
-  _DetailItem({
-    this.productRef,
-    this.price = 0,
-    this.qty = 1,
-    this.unitName = 'unit',
-    required this.products,
-    this.docRef,
-  });
+  _DetailItem({this.productRef, this.price = 0, this.qty = 1, required this.products, this.docRef});
 
   factory _DetailItem.fromMap(Map<String, dynamic> data, List<DocumentSnapshot> products, DocumentReference ref) {
     return _DetailItem(
       productRef: data['product_ref'],
       price: data['price'],
       qty: data['qty'],
-      unitName: data['unit_name'] ?? 'unit',
       products: products,
       docRef: ref,
     );
@@ -326,7 +382,6 @@ class _DetailItem {
       'product_ref': productRef,
       'price': price,
       'qty': qty,
-      'unit_name': unitName,
       'subtotal': subtotal,
     };
   }

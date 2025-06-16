@@ -386,40 +386,41 @@ class DeliveryListPage extends StatefulWidget {
 }
 
 class _DeliveryListPageState extends State<DeliveryListPage> {
-  List<DocumentSnapshot> _allDeliveries = [];
+  List<DocumentSnapshot> _allInvoices = [];
   final Map<String, List<DocumentSnapshot>> _detailsMap = {};
-  final Set<String> _expandedDeliveries = {};
+  final Set<String> _expandedInvoices = {};
   bool _loading = true;
+
+  final rupiahFormat = NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
 
   @override
   void initState() {
     super.initState();
-    _loadDeliveriesForStore();
+    _loadInvoices();
   }
 
-  Future<void> _loadDeliveriesForStore() async {
+  Future<void> _loadInvoices() async {
     final prefs = await SharedPreferences.getInstance();
     final storeRefPath = prefs.getString('store_ref');
     if (storeRefPath == null || storeRefPath.isEmpty) return;
 
     final storeRef = FirebaseFirestore.instance.doc(storeRefPath);
-    final deliveriesSnapshot = await FirebaseFirestore.instance
+    final invoicesSnapshot = await FirebaseFirestore.instance
         .collection('deliveries')
         .where('store_ref', isEqualTo: storeRef)
         .get();
 
     setState(() {
-      _allDeliveries = deliveriesSnapshot.docs;
+      _allInvoices = invoicesSnapshot.docs;
       _loading = false;
     });
   }
 
   Future<List<String>> _resolveReferences(
     DocumentReference? storeRef,
-    DocumentReference? storeRefTo,
     DocumentReference? warehouseRef,
   ) async {
-    final refs = [storeRef, storeRefTo, warehouseRef];
+    final refs = [storeRef, warehouseRef];
     final names = await Future.wait(refs.map((ref) async {
       if (ref == null) return 'Unknown';
       try {
@@ -430,25 +431,24 @@ class _DeliveryListPageState extends State<DeliveryListPage> {
         return 'Error';
       }
     }).cast<Future<String>>());
-
     return names;
   }
 
-  Future<void> _toggleDetails(String deliveryId, DocumentReference deliveryRef) async {
-    if (_expandedDeliveries.contains(deliveryId)) {
+  Future<void> _toggleDetails(String invoiceId, DocumentReference invoiceRef) async {
+    if (_expandedInvoices.contains(invoiceId)) {
       setState(() {
-        _expandedDeliveries.remove(deliveryId);
+        _expandedInvoices.remove(invoiceId);
       });
       return;
     }
 
-    if (!_detailsMap.containsKey(deliveryId)) {
-      final detailSnapshot = await deliveryRef.collection('details').get();
-      _detailsMap[deliveryId] = detailSnapshot.docs;
+    if (!_detailsMap.containsKey(invoiceId)) {
+      final detailSnapshot = await invoiceRef.collection('details').get();
+      _detailsMap[invoiceId] = detailSnapshot.docs;
     }
 
     setState(() {
-      _expandedDeliveries.add(deliveryId);
+      _expandedInvoices.add(invoiceId);
     });
   }
 
@@ -466,28 +466,31 @@ class _DeliveryListPageState extends State<DeliveryListPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Deliveries')),
+      appBar: AppBar(title: const Text('Sales Invoices')),
       body: _loading
-          ? const Center(child: Text('Masukkan kode dan nama toko terlebih dahulu.'))
-          : _allDeliveries.isEmpty
-              ? const Center(child: Text('Tidak ada delivery.'))
+          ? const Center(child: CircularProgressIndicator())
+          : _allInvoices.isEmpty
+              ? const Center(child: Text('Tidak ada sales invoice.'))
               : ListView.builder(
-                  itemCount: _allDeliveries.length,
+                  itemCount: _allInvoices.length,
                   itemBuilder: (context, index) {
-                    final document = _allDeliveries[index];
+                    final document = _allInvoices[index];
                     final data = document.data() as Map<String, dynamic>;
-                    final deliveryId = document.id;
+                    final invoiceId = document.id;
                     final postDate = DateTime.tryParse(data['post_date'] ?? '') ??
                         (data['created_at'] as Timestamp).toDate();
 
                     return FutureBuilder<List<String>>(
                       future: _resolveReferences(
                         data['store_ref'],
-                        data['destination_store_ref'],
                         data['warehouse_ref'],
                       ),
                       builder: (context, snapshot) {
-                        final refNames = snapshot.data ?? ['Loading...', 'Loading...', 'Loading...'];
+                        final refNames = snapshot.data ?? ['Loading...', 'Loading...'];
+                        final bool isCredit = data['is_credit'] ?? false;
+                        final int creditMonths = data['credit_duration'] ?? 0;
+                        final bool paidOff = data['credit_paid'] ?? false;
+
                         return Card(
                           margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                           child: Padding(
@@ -495,36 +498,48 @@ class _DeliveryListPageState extends State<DeliveryListPage> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text("No. Form: ${data['no_form']}", style: const TextStyle(fontWeight: FontWeight.bold)),
+                                Text("No Faktur: ${data['no_faktur']}", style: const TextStyle(fontWeight: FontWeight.bold)),
                                 Text("Post Date: ${DateFormat('yyyy-MM-dd').format(postDate)}"),
                                 Text("Grand Total: ${rupiahFormat.format(data['grandtotal'])}"),
                                 Text("Item Total: ${data['item_total']}"),
-                                Text("Store Asal: ${refNames[0]}"),
-                                Text("Store Tujuan: ${refNames[1]}"),
-                                Text("Warehouse: ${refNames[2]}"),
-                                Text("Synced: ${data['synced'] ? 'Yes' : 'No'}"),
-                                Text("Created At: ${(data['created_at'] as Timestamp).toDate()}"),
+                                Text("Store: ${refNames[0]}"),
+                                Text("Warehouse: ${refNames[1]}"),
+                                Text("Cash/Credit: ${isCredit ? 'Credit' : 'Cash'}"),
+                                if (isCredit) Text("Tenor: $creditMonths bulan"),
+                                if (isCredit) Row(
+                                  children: [
+                                    const Text("Paid Off: "),
+                                    Checkbox(
+                                      value: paidOff,
+                                      onChanged: (value) async {
+                                        await document.reference.update({'credit_paid': value});
+                                        await _loadInvoices();
+                                      },
+                                    ),
+                                  ],
+                                ),
+                                Text("Keterangan: ${data['keterangan'] ?? ''}"),
                                 const SizedBox(height: 12),
                                 Row(
                                   children: [
                                     ElevatedButton(
-                                      onPressed: () => _toggleDetails(deliveryId, document.reference),
-                                      child: Text(_expandedDeliveries.contains(deliveryId) ? 'Sembunyikan Detail' : 'Lihat Detail'),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    IconButton(
+                                      onPressed: () => _toggleDetails(invoiceId, document.reference),
+                                      child: Text(_expandedInvoices.contains(invoiceId) ? 'Sembunyikan Detail' : 'Lihat Detail'),
+                                    ), 
+                                  const SizedBox(width: 8),
+                                  IconButton(
                                       icon: const Icon(Icons.edit, color: Colors.blue),
                                       onPressed: () async {
                                         final result = await showModalBottomSheet(
                                           context: context,
                                           isScrollControlled: true,
                                           builder: (_) => EditDeliveryModal(
-                                            deliveryRef: document.reference,
-                                            deliveryData: data,
+                                            invoiceRef: document.reference,
+                                            invoiceData: data,
                                           ),
                                         );
                                         if (result == 'updated') {
-                                          await _loadDeliveriesForStore();
+                                          await _loadInvoices();
                                         }
                                       },
                                     ),
@@ -535,27 +550,20 @@ class _DeliveryListPageState extends State<DeliveryListPage> {
                                         final confirmed = await showDialog<bool>(
                                           context: context,
                                           builder: (context) => AlertDialog(
-                                            title: const Text('Hapus Delivery?'),
-                                            content: const Text('Apakah Anda yakin ingin menghapus delivery ini?'),
+                                            title: const Text('Hapus Sales Invoice?'),
+                                            content: const Text('Apakah Anda yakin ingin menghapus sales invoice ini?'),
                                             actions: [
-                                              TextButton(
-                                                onPressed: () => Navigator.pop(context, false),
-                                                child: const Text('Batal'),
-                                              ),
-                                              TextButton(
-                                                onPressed: () => Navigator.pop(context, true),
-                                                child: const Text('Hapus'),
-                                              ),
+                                              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Batal')),
+                                              TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Hapus')),
                                             ],
                                           ),
                                         );
                                         if (confirmed == true) {
                                           final detailsSnapshot = await document.reference.collection('details').get();
-
                                           for (var detailDoc in detailsSnapshot.docs) {
                                             final detailData = detailDoc.data();
                                             final productRef = detailData['product_ref'] as DocumentReference?;
-                                            final warehouseRef = detailData['warehouse_ref'] as DocumentReference? ?? data['warehouse_ref'];
+                                            final warehouseRef = data['warehouse_ref'];
                                             final qty = detailData['qty'];
 
                                             if (productRef != null && warehouseRef != null && qty != null) {
@@ -571,7 +579,6 @@ class _DeliveryListPageState extends State<DeliveryListPage> {
                                                 final stockRef = stockDoc.reference;
                                                 final stockData = stockDoc.data();
                                                 final stockQty = stockData['qty'] ?? 0;
-
                                                 await stockRef.update({'qty': stockQty + qty});
                                               } else {
                                                 await FirebaseFirestore.instance.collection('stocks').add({
@@ -585,25 +592,21 @@ class _DeliveryListPageState extends State<DeliveryListPage> {
                                                 final productSnap = await transaction.get(productRef);
                                                 final productData = productSnap.data() as Map<String, dynamic>?;
                                                 final currentQty = productData?['qty'] ?? 0;
-                                                transaction.update(productRef, {
-                                                  'qty': currentQty + qty,
-                                                });
+                                                transaction.update(productRef, {'qty': currentQty + qty});
                                               });
                                             }
-
                                             await detailDoc.reference.delete();
                                           }
-
                                           await document.reference.delete();
-                                          await _loadDeliveriesForStore();
+                                          await _loadInvoices();
                                         }
                                       },
                                     ),
                                   ],
                                 ),
-                                if (_expandedDeliveries.contains(deliveryId))
+                                if (_expandedInvoices.contains(invoiceId))
                                   Column(
-                                    children: _detailsMap[deliveryId]?.map((detailDoc) {
+                                    children: _detailsMap[invoiceId]?.map((detailDoc) {
                                           final detail = detailDoc.data() as Map<String, dynamic>;
                                           return FutureBuilder<String>(
                                             future: _resolveProductName(detail['product_ref']),
@@ -635,17 +638,17 @@ class _DeliveryListPageState extends State<DeliveryListPage> {
                 ),
       floatingActionButton: Column(
         mainAxisAlignment: MainAxisAlignment.end,
-        children: [
+        children : [
           const SizedBox(height: 10),
           ElevatedButton(
             onPressed: () async {
               await Navigator.push(
                 context,
-                MaterialPageRoute(builder: (context) => AddDeliveryPage()), 
+                MaterialPageRoute(builder: (context) => AddDeliveryPage()),
               );
-              await _loadDeliveriesForStore();
+              await _loadInvoices();
             },
-            child: const Text('Tambah Delivery'),
+            child: const Text('Tambah Receipt'),
           ),
         ],
       ),

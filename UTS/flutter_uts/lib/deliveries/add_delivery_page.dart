@@ -12,19 +12,27 @@ class AddDeliveryPage extends StatefulWidget {
 class _AddDeliveryPageState extends State<AddDeliveryPage> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _formNumberController = TextEditingController();
-  DateTime? _selectedPostDate;
   final TextEditingController _postDateController = TextEditingController();
+  final TextEditingController _keteranganController = TextEditingController();
+  final TextEditingController _descriptionController = TextEditingController();
 
+  DateTime? _selectedPostDate;
   DocumentReference? _selectedStore;
   DocumentReference? _selectedWarehouse;
+
   List<DocumentSnapshot> _stores = [];
   List<DocumentSnapshot> _warehouses = [];
   List<DocumentSnapshot> _products = [];
 
   final List<_DetailItem> _productDetails = [];
 
+  bool _isCredit = false;
+  int _creditDuration = 3; // 3, 6, 12 months
+  bool _isPaid = false;
+
   int get itemTotal => _productDetails.fold(0, (sum, item) => sum + item.qty);
   int get grandTotal => _productDetails.fold(0, (sum, item) => sum + item.subtotal);
+  double get installmentPerMonth => _isCredit ? grandTotal / _creditDuration : 0;
 
   @override
   void initState() {
@@ -45,8 +53,8 @@ class _AddDeliveryPageState extends State<AddDeliveryPage> {
     final warehouses = await FirebaseFirestore.instance.collection('warehouses').where('store_ref', isEqualTo: storeRef).get();
     final products = await FirebaseFirestore.instance.collection('products').where('store_ref', isEqualTo: storeRef).get();
 
-    final generatedFormNo = await _generateFormNumber(); 
-    
+    final generatedFormNo = await _generateFormNumber();
+
     setState(() {
       _stores = stores;
       _warehouses = warehouses.docs;
@@ -59,13 +67,13 @@ class _AddDeliveryPageState extends State<AddDeliveryPage> {
     final receipts = await FirebaseFirestore.instance
         .collection('deliveries')
         .orderBy('created_at', descending: true)
-        .get(); 
+        .get();
 
     int maxNumber = 0;
-    final base = 'TTJ22100034';
+    final base = 'FTR22100034';
 
     for (var doc in receipts.docs) {
-      final lastForm = doc['no_form'];
+      final lastForm = doc['no_faktur'];
       final parts = lastForm.split('_');
       if (parts.length == 2) {
         final number = int.tryParse(parts[1]) ?? 0;
@@ -79,7 +87,7 @@ class _AddDeliveryPageState extends State<AddDeliveryPage> {
     return '${base}_$nextNumber';
   }
 
-  Future<void> _saveDelivery() async {
+  Future<void> _saveSales() async {
     if (!_formKey.currentState!.validate() ||
         _selectedStore == null ||
         _selectedWarehouse == null ||
@@ -92,22 +100,28 @@ class _AddDeliveryPageState extends State<AddDeliveryPage> {
     if (storeRefPath == null) return;
     final storeRef = FirebaseFirestore.instance.doc(storeRefPath);
 
-    final deliveryData = {
-      'no_form': _formNumberController.text.trim(),
+    final salesData = {
+      'no_faktur': _formNumberController.text.trim(),
       'grandtotal': grandTotal,
       'item_total': itemTotal,
       'post_date': _selectedPostDate?.toIso8601String() ?? DateTime.now().toIso8601String(),
       'created_at': DateTime.now(),
       'store_ref': storeRef,
-      'destination_store_ref': _selectedStore,
+      'customer_store_ref': _selectedStore,
       'warehouse_ref': _selectedWarehouse,
+      'is_credit': _isCredit,
+      'credit_duration': _isCredit ? _creditDuration : 0,
+      'installment': _isCredit ? installmentPerMonth : 0,
+      'is_paid': _isPaid,
+      'keterangan': _keteranganController.text.trim(),
+      'description': _descriptionController.text.trim(),
       'synced': true,
     };
 
-    final deliveryDoc = await FirebaseFirestore.instance.collection('deliveries').add(deliveryData);
+    final salesDoc = await FirebaseFirestore.instance.collection('deliveries').add(salesData);
 
     for (final item in _productDetails) {
-      await deliveryDoc.collection('details').add(item.toMap());
+      await salesDoc.collection('details').add(item.toMap());
 
       if (item.productRef != null && _selectedWarehouse != null) {
         final stockQuery = await FirebaseFirestore.instance
@@ -128,7 +142,7 @@ class _AddDeliveryPageState extends State<AddDeliveryPage> {
           } else if (stockQty > item.qty) {
             await stockRef.update({'qty': stockQty - item.qty});
           } else {
-            print('Warning: Stock qty (${stockQty}) < delivery qty (${item.qty}) for product ${item.productRef!.id}');
+            print('Warning: Stock qty (${stockQty}) < sales qty (${item.qty}) for product ${item.productRef!.id}');
           }
         } else {
           print('Warning: No stock found for product ${item.productRef!.id} in selected warehouse');
@@ -143,7 +157,7 @@ class _AddDeliveryPageState extends State<AddDeliveryPage> {
     }
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text("Delivery berhasil ditambah.")),
+      SnackBar(content: Text("Sales berhasil disimpan.")),
     );
 
     if (mounted) Navigator.pop(context);
@@ -180,7 +194,7 @@ class _AddDeliveryPageState extends State<AddDeliveryPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Tambah Delivery')),
+      appBar: AppBar(title: Text('Tambah Penjualan (Faktur)')),
       body: _products.isEmpty
           ? Center(child: CircularProgressIndicator())
           : Padding(
@@ -191,7 +205,7 @@ class _AddDeliveryPageState extends State<AddDeliveryPage> {
                   children: [
                     TextFormField(
                       controller: _formNumberController,
-                      decoration: InputDecoration(labelText: 'No. Form'),
+                      decoration: InputDecoration(labelText: 'No. Faktur'),
                       readOnly: true,
                     ),
                     SizedBox(height: 16),
@@ -203,7 +217,7 @@ class _AddDeliveryPageState extends State<AddDeliveryPage> {
                         );
                       }).toList(),
                       onChanged: (value) => setState(() => _selectedStore = value),
-                      decoration: InputDecoration(labelText: "Store Tujuan"),
+                      decoration: InputDecoration(labelText: "Store (Customer)"),
                       validator: (value) => value == null ? 'Pilih store' : null,
                     ),
                     DropdownButtonFormField<DocumentReference>(
@@ -226,6 +240,49 @@ class _AddDeliveryPageState extends State<AddDeliveryPage> {
                       validator: (value) => value == null || value.isEmpty ? 'Pilih tanggal' : null,
                     ),
                     SizedBox(height: 16),
+
+                    /// CREDIT SECTION
+                    CheckboxListTile(
+                      value: _isCredit,
+                      onChanged: (val) => setState(() => _isCredit = val!),
+                      title: Text("Credit?"),
+                    ),
+                    if (_isCredit)
+                      DropdownButtonFormField<int>(
+                        value: _creditDuration,
+                        items: [3, 6, 12].map((month) {
+                          return DropdownMenuItem(
+                            value: month,
+                            child: Text("$month bulan"),
+                          );
+                        }).toList(),
+                        onChanged: (val) => setState(() => _creditDuration = val!),
+                        decoration: InputDecoration(labelText: "Durasi Kredit"),
+                      ),
+                    if (_isCredit)
+                      Text("Cicilan per bulan: ${installmentPerMonth.toStringAsFixed(2)}"),
+
+                    CheckboxListTile(
+                      value: _isPaid,
+                      onChanged: (val) => setState(() => _isPaid = val!),
+                      title: Text("Sudah Lunas?"),
+                    ),
+                    SizedBox(height: 16),
+
+                    TextFormField(
+                      controller: _keteranganController,
+                      maxLines: 3,
+                      decoration: InputDecoration(labelText: 'Keterangan'),
+                    ),
+                    SizedBox(height: 16),
+                    TextFormField(
+                      controller: _descriptionController,
+                      maxLines: 3,
+                      decoration: InputDecoration(labelText: 'Description'),
+                    ),
+                    SizedBox(height: 24),
+
+                    /// PRODUCT DETAIL SECTION
                     Text("Detail Produk", style: TextStyle(fontWeight: FontWeight.bold)),
                     SizedBox(height: 8),
                     ..._productDetails.asMap().entries.map((entry) {
@@ -252,7 +309,7 @@ class _AddDeliveryPageState extends State<AddDeliveryPage> {
                                     item.unitController.text = item.unitName;
                                     item.availableStock = 0;
                                   });
-                                
+
                                   if (value != null && _selectedWarehouse != null) {
                                     final stockQuery = await FirebaseFirestore.instance
                                         .collection('stocks')
@@ -260,13 +317,13 @@ class _AddDeliveryPageState extends State<AddDeliveryPage> {
                                         .where('warehouse_ref', isEqualTo: _selectedWarehouse)
                                         .limit(1)
                                         .get();
-                                
+
                                     int stockQty = 0;
                                     if (stockQuery.docs.isNotEmpty) {
                                       final stockData = stockQuery.docs.first.data();
                                       stockQty = stockData['qty'] ?? 0;
                                     }
-                                
+
                                     setState(() {
                                       item.availableStock = stockQty;
                                     });
@@ -332,8 +389,8 @@ class _AddDeliveryPageState extends State<AddDeliveryPage> {
                     Text("Grand Total: $grandTotal"),
                     SizedBox(height: 24),
                     ElevatedButton(
-                      onPressed: _saveDelivery,
-                      child: Text('Simpan Delivery'),
+                      onPressed: _saveSales,
+                      child: Text('Simpan Faktur Penjualan'),
                     ),
                   ],
                 ),
