@@ -18,7 +18,7 @@
       if (_formKey.currentState!.validate()) {
         final prefs = await SharedPreferences.getInstance();
         
-        final storeRefPath = prefs.getString('store_ref');
+        final storeRefPath = prefs.getString('customer_ref');
         if (storeRefPath == null) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text("Store reference not found.")),
@@ -32,7 +32,7 @@
           'name': _productController.text.trim(),
           'qty': 0,
           'default_price': int.tryParse(_priceController.text.trim()) ?? 0,
-          'store_ref': storeRef,
+          'customer_ref': storeRef,
         });
 
         ScaffoldMessenger.of(context).showSnackBar(

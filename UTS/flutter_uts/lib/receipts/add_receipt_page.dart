@@ -34,13 +34,13 @@ class _AddReceiptPageState extends State<AddReceiptPage> {
 
   Future<void> _fetchDropdownData() async {
     final prefs = await SharedPreferences.getInstance();
-    final storeRefPath = prefs.getString('store_ref');
+    final storeRefPath = prefs.getString('customer_ref');
     if (storeRefPath == null) return;
     final storeRef = FirebaseFirestore.instance.doc(storeRefPath);
 
-    final suppliers = await FirebaseFirestore.instance.collection('suppliers').where('store_ref', isEqualTo: storeRef).get();
-    final warehouses = await FirebaseFirestore.instance.collection('warehouses').where('store_ref', isEqualTo: storeRef).get();
-    final products = await FirebaseFirestore.instance.collection('products').where('store_ref', isEqualTo: storeRef).get();
+    final suppliers = await FirebaseFirestore.instance.collection('suppliers').where('customer_ref', isEqualTo: storeRef).get();
+    final warehouses = await FirebaseFirestore.instance.collection('warehouses').where('customer_ref', isEqualTo: storeRef).get();
+    final products = await FirebaseFirestore.instance.collection('products').where('customer_ref', isEqualTo: storeRef).get();
 
     final generatedFormNo = await _generateFormNumber(); 
 
@@ -77,7 +77,7 @@ class _AddReceiptPageState extends State<AddReceiptPage> {
         _productDetails.isEmpty) {return;}
         
     final prefs = await SharedPreferences.getInstance();
-    final storeRefPath = prefs.getString('store_ref');
+    final storeRefPath = prefs.getString('customer_ref');
     if (storeRefPath == null) return;
     final storeRef = FirebaseFirestore.instance.doc(storeRefPath);
 
@@ -87,10 +87,9 @@ class _AddReceiptPageState extends State<AddReceiptPage> {
       'item_total': itemTotal,
       'post_date': _selectedPostDate?.toIso8601String() ?? DateTime.now().toIso8601String(),
       'created_at': DateTime.now(),
-      'store_ref': storeRef,
+      'customer_ref': storeRef,
       'supplier_ref': _selectedSupplier,
       'warehouse_ref': _selectedWarehouse,
-      'synced': true,
     };
 
     final receiptDoc = await FirebaseFirestore.instance.collection('purchaseGoodsReceipts').add(receiptData);
@@ -108,7 +107,7 @@ class _AddReceiptPageState extends State<AddReceiptPage> {
       
       final stockQuery = await FirebaseFirestore.instance
         .collection('stocks')
-        .where('store_ref', isEqualTo: storeRef)
+        .where('customer_ref', isEqualTo: storeRef)
         .where('warehouse_ref', isEqualTo: _selectedWarehouse)
         .where('product_ref', isEqualTo: item.productRef)
         .get();
@@ -130,7 +129,7 @@ class _AddReceiptPageState extends State<AddReceiptPage> {
 
         await FirebaseFirestore.instance.collection('stocks').add({
           'id': nextId,
-          'store_ref': storeRef,
+          'customer_ref': storeRef,
           'warehouse_ref': _selectedWarehouse,
           'product_ref': item.productRef,
           'qty': item.qty,

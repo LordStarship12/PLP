@@ -21,7 +21,7 @@ class _AddNotePageState extends State<AddNotePage> {
         'content': _contentController.text.trim(),
         'created_at': Timestamp.now(),
         'synced': false,
-        'created_by': widget.myUserId, // ✅ Always "Timothy"
+        'created_by': widget.myUserId, 
       });
 
       if (mounted) Navigator.pop(context, true);

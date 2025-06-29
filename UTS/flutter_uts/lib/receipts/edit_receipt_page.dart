@@ -54,13 +54,13 @@ class _EditReceiptModalState extends State<EditReceiptModal> {
 
   Future<void> _fetchDropdownData() async {
     final prefs = await SharedPreferences.getInstance();
-    final storeRefPath = prefs.getString('store_ref');
+    final storeRefPath = prefs.getString('customer_ref');
     if (storeRefPath == null) return;
     final storeRef = FirebaseFirestore.instance.doc(storeRefPath);
 
-    final suppliers = await FirebaseFirestore.instance.collection('suppliers').where('store_ref', isEqualTo: storeRef).get();
-    final warehouses = await FirebaseFirestore.instance.collection('warehouses').where('store_ref', isEqualTo: storeRef).get();
-    final products = await FirebaseFirestore.instance.collection('products').where('store_ref', isEqualTo: storeRef).get();
+    final suppliers = await FirebaseFirestore.instance.collection('suppliers').where('customer_ref', isEqualTo: storeRef).get();
+    final warehouses = await FirebaseFirestore.instance.collection('warehouses').where('customer_ref', isEqualTo: storeRef).get();
+    final products = await FirebaseFirestore.instance.collection('products').where('customer_ref', isEqualTo: storeRef).get();
     final detailsSnapshot = await widget.receiptRef.collection('details').get();
 
     if (!mounted) return;

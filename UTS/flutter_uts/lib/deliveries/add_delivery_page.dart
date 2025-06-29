@@ -13,26 +13,22 @@ class _AddDeliveryPageState extends State<AddDeliveryPage> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _formNumberController = TextEditingController();
   final TextEditingController _postDateController = TextEditingController();
-  final TextEditingController _keteranganController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
 
   DateTime? _selectedPostDate;
   DocumentReference? _selectedStore;
   DocumentReference? _selectedWarehouse;
+  DocumentReference? _selectedSalesman;
 
   List<DocumentSnapshot> _stores = [];
   List<DocumentSnapshot> _warehouses = [];
   List<DocumentSnapshot> _products = [];
+  List<DocumentSnapshot> _salesmen = [];
 
   final List<_DetailItem> _productDetails = [];
 
-  bool _isCredit = false;
-  int _creditDuration = 3; // 3, 6, 12 months
-  bool _isPaid = false;
-
   int get itemTotal => _productDetails.fold(0, (sum, item) => sum + item.qty);
   int get grandTotal => _productDetails.fold(0, (sum, item) => sum + item.subtotal);
-  double get installmentPerMonth => _isCredit ? grandTotal / _creditDuration : 0;
 
   @override
   void initState() {
@@ -43,15 +39,16 @@ class _AddDeliveryPageState extends State<AddDeliveryPage> {
 
   Future<void> _fetchDropdownData() async {
     final prefs = await SharedPreferences.getInstance();
-    final storeRefPath = prefs.getString('store_ref');
+    final storeRefPath = prefs.getString('customer_ref');
     if (storeRefPath == null) return;
     final storeRef = FirebaseFirestore.instance.doc(storeRefPath);
 
-    final storesQuery = await FirebaseFirestore.instance.collection('stores').get();
+    final storesQuery = await FirebaseFirestore.instance.collection('customers').get();
     final stores = storesQuery.docs.where((doc) => doc.reference.path != storeRef.path).toList();
 
-    final warehouses = await FirebaseFirestore.instance.collection('warehouses').where('store_ref', isEqualTo: storeRef).get();
-    final products = await FirebaseFirestore.instance.collection('products').where('store_ref', isEqualTo: storeRef).get();
+    final warehouses = await FirebaseFirestore.instance.collection('warehouses').where('customer_ref', isEqualTo: storeRef).get();
+    final products = await FirebaseFirestore.instance.collection('products').where('customer_ref', isEqualTo: storeRef).get();
+    final salesmen = await FirebaseFirestore.instance.collection('salesmen').where('customer_ref', isEqualTo: storeRef).get();
 
     final generatedFormNo = await _generateFormNumber();
 
@@ -59,6 +56,7 @@ class _AddDeliveryPageState extends State<AddDeliveryPage> {
       _stores = stores;
       _warehouses = warehouses.docs;
       _products = products.docs;
+      _salesmen = salesmen.docs;
       _formNumberController.text = generatedFormNo;
     });
   }
@@ -96,7 +94,7 @@ class _AddDeliveryPageState extends State<AddDeliveryPage> {
     }
 
     final prefs = await SharedPreferences.getInstance();
-    final storeRefPath = prefs.getString('store_ref');
+    final storeRefPath = prefs.getString('customer_ref');
     if (storeRefPath == null) return;
     final storeRef = FirebaseFirestore.instance.doc(storeRefPath);
 
@@ -106,14 +104,10 @@ class _AddDeliveryPageState extends State<AddDeliveryPage> {
       'item_total': itemTotal,
       'post_date': _selectedPostDate?.toIso8601String() ?? DateTime.now().toIso8601String(),
       'created_at': DateTime.now(),
-      'store_ref': storeRef,
+      'customer_ref': storeRef,
       'customer_store_ref': _selectedStore,
       'warehouse_ref': _selectedWarehouse,
-      'is_credit': _isCredit,
-      'credit_duration': _isCredit ? _creditDuration : 0,
-      'installment': _isCredit ? installmentPerMonth : 0,
-      'is_paid': _isPaid,
-      'keterangan': _keteranganController.text.trim(),
+      'salesman_ref': _selectedSalesman,
       'description': _descriptionController.text.trim(),
       'synced': true,
     };
@@ -213,12 +207,12 @@ class _AddDeliveryPageState extends State<AddDeliveryPage> {
                       items: _stores.map((doc) {
                         return DropdownMenuItem(
                           value: doc.reference,
-                          child: Text(doc['name']),
+                          child: Text(doc['name'] ?? 'Tanpa Nama'),
                         );
                       }).toList(),
                       onChanged: (value) => setState(() => _selectedStore = value),
-                      decoration: InputDecoration(labelText: "Store (Customer)"),
-                      validator: (value) => value == null ? 'Pilih store' : null,
+                      decoration: InputDecoration(labelText: "Customer"),
+                      validator: (value) => value == null ? 'Pilih customer' : null,
                     ),
                     DropdownButtonFormField<DocumentReference>(
                       items: _warehouses.map((doc) {
@@ -231,6 +225,17 @@ class _AddDeliveryPageState extends State<AddDeliveryPage> {
                       decoration: InputDecoration(labelText: "Warehouse Asal"),
                       validator: (value) => value == null ? 'Pilih warehouse' : null,
                     ),
+                    DropdownButtonFormField<DocumentReference>(
+                      items: _salesmen.map((doc) {
+                        return DropdownMenuItem(
+                          value: doc.reference,
+                          child: Text(doc['name']),
+                        );
+                      }).toList(),
+                      onChanged: (value) => setState(() => _selectedSalesman = value),
+                      decoration: InputDecoration(labelText: "Salesman"),
+                      validator: (value) => value == null ? 'Pilih salesman' : null,
+                    ),
                     SizedBox(height: 24),
                     TextFormField(
                       controller: _postDateController,
@@ -240,49 +245,12 @@ class _AddDeliveryPageState extends State<AddDeliveryPage> {
                       validator: (value) => value == null || value.isEmpty ? 'Pilih tanggal' : null,
                     ),
                     SizedBox(height: 16),
-
-                    /// CREDIT SECTION
-                    CheckboxListTile(
-                      value: _isCredit,
-                      onChanged: (val) => setState(() => _isCredit = val!),
-                      title: Text("Credit?"),
-                    ),
-                    if (_isCredit)
-                      DropdownButtonFormField<int>(
-                        value: _creditDuration,
-                        items: [3, 6, 12].map((month) {
-                          return DropdownMenuItem(
-                            value: month,
-                            child: Text("$month bulan"),
-                          );
-                        }).toList(),
-                        onChanged: (val) => setState(() => _creditDuration = val!),
-                        decoration: InputDecoration(labelText: "Durasi Kredit"),
-                      ),
-                    if (_isCredit)
-                      Text("Cicilan per bulan: ${installmentPerMonth.toStringAsFixed(2)}"),
-
-                    CheckboxListTile(
-                      value: _isPaid,
-                      onChanged: (val) => setState(() => _isPaid = val!),
-                      title: Text("Sudah Lunas?"),
-                    ),
-                    SizedBox(height: 16),
-
-                    TextFormField(
-                      controller: _keteranganController,
-                      maxLines: 3,
-                      decoration: InputDecoration(labelText: 'Keterangan'),
-                    ),
-                    SizedBox(height: 16),
                     TextFormField(
                       controller: _descriptionController,
                       maxLines: 3,
                       decoration: InputDecoration(labelText: 'Description'),
                     ),
                     SizedBox(height: 24),
-
-                    /// PRODUCT DETAIL SECTION
                     Text("Detail Produk", style: TextStyle(fontWeight: FontWeight.bold)),
                     SizedBox(height: 8),
                     ..._productDetails.asMap().entries.map((entry) {
