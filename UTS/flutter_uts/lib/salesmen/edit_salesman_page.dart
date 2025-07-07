@@ -19,6 +19,9 @@ class _EditSalesmanModalState extends State<EditSalesmanModal> {
   final TextEditingController _areaController = TextEditingController();
   bool _loading = true;
 
+  final Color pastelBlue = const Color(0xFFE3F2FD);
+  final Color primaryBlue = const Color(0xFF2196F3);
+
   @override
   void initState() {
     super.initState();
@@ -33,7 +36,7 @@ class _EditSalesmanModalState extends State<EditSalesmanModal> {
       _areaController.text = data?['area'] ?? '';
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Gagal memuat data salesman')),
+        const SnackBar(content: Text('Gagal memuat data salesman')),
       );
     } finally {
       setState(() => _loading = false);
@@ -50,7 +53,7 @@ class _EditSalesmanModalState extends State<EditSalesmanModal> {
     });
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text("Salesman berhasil diedit.")),
+      const SnackBar(content: Text("Salesman berhasil diedit.")),
     );
 
     if (mounted) Navigator.pop(context, 'updated');
@@ -59,6 +62,7 @@ class _EditSalesmanModalState extends State<EditSalesmanModal> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: pastelBlue,
       appBar: AppBar(title: const Text('Edit Salesman')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -70,19 +74,33 @@ class _EditSalesmanModalState extends State<EditSalesmanModal> {
                   children: [
                     TextFormField(
                       controller: _nameController,
-                      decoration: const InputDecoration(labelText: 'Nama Salesman'),
+                      decoration: const InputDecoration(
+                        labelText: 'Nama Salesman',
+                        border: OutlineInputBorder(),
+                      ),
                       validator: (value) => value!.isEmpty ? 'Wajib diisi' : null,
                     ),
                     const SizedBox(height: 24),
                     TextFormField(
                       controller: _areaController,
-                      decoration: const InputDecoration(labelText: 'Area Penjualan'),
+                      decoration: const InputDecoration(
+                        labelText: 'Area Penjualan',
+                        border: OutlineInputBorder(),
+                      ),
                       validator: (value) => value!.isEmpty ? 'Wajib diisi' : null,
                     ),
                     const SizedBox(height: 24),
-                    ElevatedButton(
-                      onPressed: _updateSalesman,
-                      child: const Text('Update Salesman'),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: _updateSalesman,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: primaryBlue,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                        ),
+                        child: const Text('Update Salesman'),
+                      ),
                     ),
                   ],
                 ),

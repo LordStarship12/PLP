@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:intl/intl.dart';
 
 class EditDeliveryModal extends StatefulWidget {
   final DocumentReference invoiceRef;
@@ -13,376 +14,356 @@ class EditDeliveryModal extends StatefulWidget {
   });
 
   @override
-  State<EditDeliveryModal> createState() => _EditDeliveryModalState();
+  _EditDeliveryPageState createState() => _EditDeliveryPageState();
 }
 
-class _EditDeliveryModalState extends State<EditDeliveryModal> {
-  final _formKey = GlobalKey<FormState>();
-  final TextEditingController _formNumberController = TextEditingController();
-  final TextEditingController _postDateController = TextEditingController();
-  final TextEditingController _keteranganController = TextEditingController();
-  final TextEditingController _descriptionController = TextEditingController();
+class _EditDeliveryPageState extends State<EditDeliveryModal> {
+  final fmt = NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
 
-  DateTime? _selectedPostDate;
-  DocumentReference? _selectedDestinationStore;
-  DocumentReference? _selectedWarehouse;
-  List<DocumentSnapshot> _stores = [];
-  List<DocumentSnapshot> _warehouses = [];
-  List<DocumentSnapshot> _products = [];
-  final List<_DetailItem> _productDetails = [];
+  List<DocumentSnapshot> stores = [], warehouses = [], products = [], salesmen = [];
+  DocumentReference? chosenStore, chosenWarehouse, chosenSalesman;
+  List<_Item> items = [];
 
-  bool _isCredit = false;
-  int _creditDuration = 3;
-  bool _isPaid = false;
+  String invoiceNo = '';
+  DateTime postDate = DateTime.now();
+  final descCtrl = TextEditingController();
 
-  int get itemTotal => _productDetails.fold(0, (sum, item) => sum + item.qty);
-  int get grandTotal => _productDetails.fold(0, (sum, item) => sum + item.subtotal);
-  double get installmentPerMonth => _isCredit ? grandTotal / _creditDuration : 0;
+  int get itemCount => items.fold(0, (sum, i) => sum + i.qty);
+  int get totalAmt => items.fold(0, (sum, i) => sum + i.subtotal);
+
+  // Theme colors
+  final Color pastelBlue = const Color(0xFFE3F2FD);
+  final Color primaryBlue = const Color(0xFF2196F3);
 
   @override
   void initState() {
     super.initState();
-    _formNumberController.text = widget.invoiceData['no_faktur'] ?? '';
-    _selectedDestinationStore = null;
-    _selectedWarehouse = widget.invoiceData['warehouse_ref'];
-    _isCredit = widget.invoiceData['is_credit'] ?? false;
-    _creditDuration = widget.invoiceData['credit_duration'] ?? 3;
-    _isPaid = widget.invoiceData['is_paid'] ?? false;
-    _keteranganController.text = widget.invoiceData['keterangan'] ?? '';
-    _descriptionController.text = widget.invoiceData['description'] ?? '';
+    invoiceNo = widget.invoiceData['no_faktur'] ?? '';
+    descCtrl.text = widget.invoiceData['description'] ?? '';
+    postDate = DateTime.tryParse(widget.invoiceData['post_date'] ?? '') ?? DateTime.now();
 
-    final postDateStr = widget.invoiceData['post_date'];
-    if (postDateStr != null) {
-      _selectedPostDate = DateTime.tryParse(postDateStr);
-      if (_selectedPostDate != null) {
-        _postDateController.text =
-            "${_selectedPostDate!.year}-${_selectedPostDate!.month.toString().padLeft(2, '0')}-${_selectedPostDate!.day.toString().padLeft(2, '0')}";
-      }
-    }
-
-    _fetchDropdownData();
+    _loadData();
   }
 
-  Future<void> _fetchDropdownData() async {
+  Future<void> _loadData() async {
     final prefs = await SharedPreferences.getInstance();
     final storeRefPath = prefs.getString('customer_ref');
     if (storeRefPath == null) return;
     final storeRef = FirebaseFirestore.instance.doc(storeRefPath);
 
-    final stores = await FirebaseFirestore.instance.collection('customers').get();
-    final warehouses = await FirebaseFirestore.instance.collection('warehouses').where('customer_ref', isEqualTo: storeRef).get();
-    final products = await FirebaseFirestore.instance.collection('products').where('customer_ref', isEqualTo: storeRef).get();
-    final detailsSnapshot = await widget.invoiceRef.collection('details').get();
+    final s = await FirebaseFirestore.instance.collection('customers').get();
+    final w = await FirebaseFirestore.instance
+        .collection('warehouses')
+        .where('customer_ref', isEqualTo: storeRef)
+        .get();
+    final p = await FirebaseFirestore.instance
+        .collection('products')
+        .where('customer_ref', isEqualTo: storeRef)
+        .get();
+    final sm = await FirebaseFirestore.instance
+        .collection('salesmen')
+        .where('customer_ref', isEqualTo: storeRef)
+        .get();
 
-    if (!mounted) return;
+    final d = await widget.invoiceRef.collection('details').get();
+
     setState(() {
-      _stores = stores.docs;
-      _warehouses = warehouses.docs;
-      _products = products.docs;
-      _productDetails.clear();
-      for (var doc in detailsSnapshot.docs) {
-        _productDetails.add(_DetailItem.fromMap(doc.data(), _products, doc.reference));
-      }
+      stores = s.docs..removeWhere((doc) => doc.reference.path == storeRefPath);
+      warehouses = w.docs;
+      products = p.docs;
+      salesmen = sm.docs;
+
+      chosenStore = (widget.invoiceData['customer_store_ref'] as DocumentReference?);
+      chosenWarehouse = (widget.invoiceData['warehouse_ref'] as DocumentReference?);
+      chosenSalesman = (widget.invoiceData['salesman_ref'] as DocumentReference?);
+
+      items = d.docs.map((doc) => _Item.fromMap(doc.data(), products)).toList();
     });
   }
 
-  Future<void> _selectPostDate(BuildContext context) async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: _selectedPostDate ?? DateTime.now(),
-      firstDate: DateTime(2000),
-      lastDate: DateTime(2100),
-    );
+  void _addItem() => setState(() => items.add(_Item(products: products)));
 
-    if (picked != null) {
-      setState(() {
-        _selectedPostDate = picked;
-        _postDateController.text = "${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}";
-      });
-    }
+  void _removeItem(int idx) => setState(() => items.removeAt(idx));
+
+  Future<int> _getAvailableStock(DocumentReference prodRef) async {
+    if (chosenWarehouse == null) return 0;
+    final q = await FirebaseFirestore.instance
+        .collection('stocks')
+        .where('product_ref', isEqualTo: prodRef)
+        .where('warehouse_ref', isEqualTo: chosenWarehouse!)
+        .limit(1)
+        .get();
+    return q.docs.isEmpty ? 0 : (q.docs.first['qty'] as int);
   }
 
-  Future<void> _updateInvoice() async {
-    if (!_formKey.currentState!.validate() ||
-        _selectedDestinationStore == null ||
-        _selectedWarehouse == null ||
-        _productDetails.isEmpty) return;
+  Future<void> _submit() async {
+    if (chosenStore == null ||
+        chosenWarehouse == null ||
+        chosenSalesman == null ||
+        items.isEmpty ||
+        items.any((i) => i.productRef == null)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Lengkapi semua data terlebih dahulu')));
+      return;
+    }
 
-    final detailsRef = widget.invoiceRef.collection('details');
     final firestore = FirebaseFirestore.instance;
+    final detailsRef = widget.invoiceRef.collection('details');
+    final warehouseRef = chosenWarehouse!;
+    final batch = firestore.batch();
 
-    final oldDetailsSnapshot = await detailsRef.get();
-    final oldQuantities = <String, int>{};
-
-    for (var doc in oldDetailsSnapshot.docs) {
+    // Step 1: Restore stock from old items
+    final oldDetails = await detailsRef.get();
+    for (var doc in oldDetails.docs) {
       final data = doc.data();
-      final productRef = (data['product_ref'] as DocumentReference).id;
-      final qty = (data['qty'] ?? 0);
-      oldQuantities[productRef] = (oldQuantities[productRef] ?? 0) + (qty as num).toInt();
-    }
-
-    for (var doc in oldDetailsSnapshot.docs) {
-      await doc.reference.delete();
-    }
-
-    final newQuantities = <String, int>{};
-    for (var item in _productDetails) {
-      final refId = item.productRef!.id;
-      newQuantities[refId] = (newQuantities[refId] ?? 0) + item.qty;
-      await item.productRef!.update({'default_price': item.price});
-      await detailsRef.add(item.toMap());
-    }
-
-    for (var productRefId in {...oldQuantities.keys, ...newQuantities.keys}) {
-      final oldQty = oldQuantities[productRefId] ?? 0;
-      final newQty = newQuantities[productRefId] ?? 0;
-      final qtyDiff = newQty - oldQty;
+      final productRef = data['product_ref'] as DocumentReference;
+      final oldQty = data['qty'] ?? 0;
 
       final stockQuery = await firestore
           .collection('stocks')
-          .where('product_ref', isEqualTo: firestore.doc('products/$productRefId'))
-          .where('warehouse_ref', isEqualTo: _selectedWarehouse)
+          .where('product_ref', isEqualTo: productRef)
+          .where('warehouse_ref', isEqualTo: warehouseRef)
           .limit(1)
           .get();
 
-      final productDocRef = firestore.doc('products/$productRefId');
-
       if (stockQuery.docs.isNotEmpty) {
-        final stockDoc = stockQuery.docs.first.reference;
-        await firestore.runTransaction((transaction) async {
-          final snapshot = await transaction.get(stockDoc);
-          final currentQty = snapshot['qty'] ?? 0;
-          transaction.update(stockDoc, {'qty': currentQty - qtyDiff});
-        });
-      } else {
-        await firestore.collection('stocks').add({
-          'product_ref': firestore.doc('products/$productRefId'),
-          'warehouse_ref': _selectedWarehouse,
-          'qty': -qtyDiff,
-        });
+        final stockDoc = stockQuery.docs.first;
+        final currentQty = stockDoc['qty'] ?? 0;
+        batch.update(stockDoc.reference, {'qty': currentQty + oldQty});
       }
-
-      await firestore.runTransaction((transaction) async {
-        final snapshot = await transaction.get(productDocRef);
-        final currentQty = snapshot['qty'] ?? 0;
-        transaction.update(productDocRef, {'qty': currentQty - qtyDiff});
-      });
     }
 
-    await widget.invoiceRef.update({
-      'no_faktur': _formNumberController.text.trim(),
-      'customer_store_ref': _selectedDestinationStore,
-      'warehouse_ref': _selectedWarehouse,
-      'item_total': itemTotal,
-      'grandtotal': grandTotal,
-      'is_credit': _isCredit,
-      'credit_duration': _isCredit ? _creditDuration : 0,
-      'installment': _isCredit ? installmentPerMonth : 0,
-      'is_paid': _isPaid,
-      'post_date': _selectedPostDate?.toIso8601String(),
-      'keterangan': _keteranganController.text.trim(),
-      'description': _descriptionController.text.trim(),
+    // Step 2: Check if new stock is available
+    for (var item in items) {
+      final productRef = item.productRef!;
+      final stockQuery = await firestore
+          .collection('stocks')
+          .where('product_ref', isEqualTo: productRef)
+          .where('warehouse_ref', isEqualTo: warehouseRef)
+          .limit(1)
+          .get();
+
+      if (stockQuery.docs.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Stok tidak ditemukan untuk produk'),
+          backgroundColor: Colors.red,
+        ));
+        return;
+      }
+
+      final stockDoc = stockQuery.docs.first;
+      final currentQty = stockDoc['qty'] ?? 0;
+
+      if (item.qty > currentQty) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Stok tidak cukup untuk produk (${item.qty} > $currentQty)'),
+          backgroundColor: Colors.red,
+        ));
+        return;
+      }
+
+      // Deduct new stock
+      batch.update(stockDoc.reference, {'qty': currentQty - item.qty});
+    }
+
+    // Step 3: Delete old details
+    for (var doc in oldDetails.docs) {
+      batch.delete(doc.reference);
+    }
+
+    // Step 4: Add new details
+    for (var item in items) {
+      batch.set(detailsRef.doc(), item.toMap());
+    }
+
+    // Step 5: Update invoice metadata
+    batch.update(widget.invoiceRef, {
+      'post_date': postDate.toIso8601String(),
+      'customer_store_ref': chosenStore,
+      'warehouse_ref': chosenWarehouse,
+      'salesman_ref': chosenSalesman,
+      'description': descCtrl.text.trim(),
+      'item_total': itemCount,
+      'grandtotal': totalAmt,
       'updated_at': DateTime.now(),
     });
 
-    if (mounted) {
-      Navigator.pop(context, 'updated');
-    }
-  }
+    await batch.commit();
 
-  void _removeProductRow(int index) {
-    setState(() => _productDetails.removeAt(index));
-  }
-
-  void _addProductRow() {
-    setState(() => _productDetails.add(_DetailItem(products: _products)));
+    if (mounted) Navigator.pop(context, 'updated');
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext ctx) {
     return Scaffold(
-      appBar: AppBar(title: Text('Edit Sales Invoice')),
-      body: _products.isEmpty
-          ? Center(child: CircularProgressIndicator())
-          : Padding(
-              padding: const EdgeInsets.all(16),
-              child: Form(
-                key: _formKey,
-                child: ListView(
-                  children: [
-                    TextFormField(
-                      controller: _formNumberController,
-                      decoration: InputDecoration(labelText: 'No. Faktur'),
-                      validator: (value) => value!.isEmpty ? 'Wajib diisi' : null,
-                    ),
-                    DropdownButtonFormField<DocumentReference>(
-                      value: _selectedDestinationStore,
-                      items: _stores.map((doc) {
-                        return DropdownMenuItem(
-                          value: doc.reference,
-                          child: Text(doc['name']),
-                        );
-                      }).toList(),
-                      onChanged: (value) => setState(() => _selectedDestinationStore = value),
-                      decoration: InputDecoration(labelText: 'Store (Customer)'),
-                      validator: (value) => value == null ? 'Pilih store' : null,
-                    ),
-                    DropdownButtonFormField<DocumentReference>(
-                      value: _selectedWarehouse,
-                      items: _warehouses.map((doc) {
-                        return DropdownMenuItem(
-                          value: doc.reference,
-                          child: Text(doc['name']),
-                        );
-                      }).toList(),
-                      onChanged: (value) => setState(() => _selectedWarehouse = value),
-                      decoration: InputDecoration(labelText: 'Warehouse Asal'),
-                      validator: (value) => value == null ? 'Pilih warehouse' : null,
-                    ),
-                    SizedBox(height: 16),
-                    TextFormField(
-                      controller: _postDateController,
-                      readOnly: true,
-                      decoration: InputDecoration(labelText: 'Tanggal Post'),
-                      onTap: () => _selectPostDate(context),
-                      validator: (value) => value == null || value.isEmpty ? 'Pilih tanggal' : null,
-                    ),
-                    CheckboxListTile(
-                      value: _isCredit,
-                      onChanged: (val) => setState(() => _isCredit = val!),
-                      title: Text("Credit?"),
-                    ),
-                    if (_isCredit)
-                      DropdownButtonFormField<int>(
-                        value: _creditDuration,
-                        items: [3, 6, 12].map((month) {
-                          return DropdownMenuItem(
-                            value: month,
-                            child: Text("$month bulan"),
-                          );
-                        }).toList(),
-                        onChanged: (val) => setState(() => _creditDuration = val!),
-                        decoration: InputDecoration(labelText: "Durasi Kredit"),
-                      ),
-                    if (_isCredit)
-                      Text("Cicilan per bulan: ${installmentPerMonth.toStringAsFixed(2)}"),
-                    CheckboxListTile(
-                      value: _isPaid,
-                      onChanged: (val) => setState(() => _isPaid = val!),
-                      title: Text("Sudah Lunas?"),
-                    ),
-                    TextFormField(
-                      controller: _keteranganController,
-                      maxLines: 3,
-                      decoration: InputDecoration(labelText: 'Keterangan'),
-                    ),
-                    TextFormField(
-                      controller: _descriptionController,
-                      maxLines: 3,
-                      decoration: InputDecoration(labelText: 'Description'),
-                    ),
-                    SizedBox(height: 16),
-                    Text("Detail Produk", style: TextStyle(fontWeight: FontWeight.bold)),
-                    ..._productDetails.asMap().entries.map((entry) {
-                      final index = entry.key;
-                      final item = entry.value;
-                      return Card(
-                        margin: EdgeInsets.symmetric(vertical: 8),
-                        child: Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: Column(
-                            children: [
-                              DropdownButtonFormField<DocumentReference>(
-                                value: item.productRef,
-                                items: _products.map((doc) {
-                                  return DropdownMenuItem(
-                                    value: doc.reference,
-                                    child: Text(doc['name']),
-                                  );
-                                }).toList(),
-                                onChanged: (value) => setState(() => item.productRef = value),
-                                decoration: InputDecoration(labelText: "Produk"),
-                                validator: (value) => value == null ? 'Pilih produk' : null,
-                              ),
-                              TextFormField(
-                                initialValue: item.price.toString(),
-                                decoration: InputDecoration(labelText: "Harga"),
-                                keyboardType: TextInputType.number,
-                                onChanged: (val) => setState(() {
-                                  item.price = int.tryParse(val) ?? 0;
-                                }),
-                                validator: (val) => val!.isEmpty ? 'Wajib diisi' : null,
-                              ),
-                              TextFormField(
-                                initialValue: item.qty.toString(),
-                                decoration: InputDecoration(labelText: "Jumlah"),
-                                keyboardType: TextInputType.number,
-                                onChanged: (val) => setState(() {
-                                  item.qty = int.tryParse(val) ?? 1;
-                                }),
-                                validator: (val) => val!.isEmpty ? 'Wajib diisi' : null,
-                              ),
-                              SizedBox(height: 8),
-                              Text("Subtotal: ${item.subtotal}"),
-                              SizedBox(height: 4),
-                              TextButton.icon(
-                                onPressed: () => _removeProductRow(index),
-                                icon: Icon(Icons.remove_circle, color: Colors.red),
-                                label: Text("Hapus Produk"),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    }),
-                    ElevatedButton.icon(
-                      onPressed: _addProductRow,
-                      icon: Icon(Icons.add),
-                      label: Text('Tambah Produk'),
-                    ),
-                    SizedBox(height: 16),
-                    Text("Item Total: $itemTotal"),
-                    Text("Grand Total: $grandTotal"),
-                    SizedBox(height: 24),
-                    ElevatedButton(
-                      onPressed: _updateInvoice,
-                      child: Text('Update Sales Invoice'),
-                    ),
-                  ],
-                ),
+      backgroundColor: pastelBlue,
+      appBar: AppBar(title: const Text('Edit Faktur')),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: ListView(children: [
+          Text('No. Faktur: $invoiceNo', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 12),
+          Row(children: [
+            Expanded(
+              child: DropdownButton<DocumentReference>(
+                value: chosenStore,
+                hint: const Text('Pilih Customer'),
+                items: stores
+                    .map((d) => DropdownMenuItem(value: d.reference, child: Text(d['name'])))
+                    .toList(),
+                onChanged: (v) => setState(() => chosenStore = v),
               ),
             ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: DropdownButton<DocumentReference>(
+                value: chosenSalesman,
+                hint: const Text('Pilih Salesman'),
+                items: salesmen
+                    .map((d) => DropdownMenuItem(value: d.reference, child: Text(d['name'])))
+                    .toList(),
+                onChanged: (v) => setState(() => chosenSalesman = v),
+              ),
+            ),
+          ]),
+          const SizedBox(height: 12),
+          Row(children: [
+            Expanded(
+              child: DropdownButton<DocumentReference>(
+                value: chosenWarehouse,
+                hint: const Text('Pilih Gudang'),
+                items: warehouses
+                    .map((d) => DropdownMenuItem(value: d.reference, child: Text(d['name'])))
+                    .toList(),
+                onChanged: (v) => setState(() => chosenWarehouse = v),
+              ),
+            ),
+            const SizedBox(width: 16),
+            TextButton(
+              onPressed: () async {
+                final dt = await showDatePicker(
+                  context: ctx,
+                  initialDate: postDate,
+                  firstDate: DateTime(2000),
+                  lastDate: DateTime(2100),
+                );
+                if (dt != null) setState(() => postDate = dt);
+              },
+              child: Text(DateFormat('yyyy-MM-dd').format(postDate)),
+            ),
+          ]),
+          const Divider(height: 24),
+          const Text('Items', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          ...items.asMap().entries.map((e) {
+            final i = e.value;
+            return Card(
+              margin: const EdgeInsets.symmetric(vertical: 6),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    Expanded(
+                      child: DropdownButton<DocumentReference>(
+                        value: i.productRef,
+                        hint: const Text('Produk'),
+                        items: products
+                            .map((p) => DropdownMenuItem(value: p.reference, child: Text(p['name'])))
+                            .toList(),
+                        onChanged: (v) => setState(() {
+                          i.productRef = v;
+                          final match = products.firstWhere((x) => x.reference == v);
+                          i.price = match['default_price'] ?? 0;
+                        }),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete, color: Colors.red),
+                      onPressed: () => _removeItem(e.key),
+                    ),
+                  ]),
+                  Row(children: [
+                    Expanded(
+                      child: TextFormField(
+                        initialValue: i.qty.toString(),
+                        decoration: const InputDecoration(labelText: 'Qty'),
+                        keyboardType: TextInputType.number,
+                        onChanged: (v) async {
+                          final val = int.tryParse(v) ?? 1;
+                          final stock = await _getAvailableStock(i.productRef!);
+                          final maxQty = stock + i.originalQty; 
+                          if (val <= maxQty) {
+                            setState(() => i.qty = val);
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                              content: Text('Qty melebihi stok ($maxQty)'),
+                              backgroundColor: Colors.red,
+                            ));
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: TextFormField(
+                        initialValue: i.price.toString(),
+                        decoration: const InputDecoration(labelText: 'Harga'),
+                        keyboardType: TextInputType.number,
+                        onChanged: (v) => setState(() {
+                          i.price = int.tryParse(v) ?? 0;
+                        }),
+                      ),
+                    ),
+                  ]),
+                  const SizedBox(height: 8),
+                  Text('Subtotal: ${fmt.format(i.subtotal)}', style: const TextStyle(fontSize: 16)),
+                ]),
+              ),
+            );
+          }),
+          TextButton.icon(
+            icon: const Icon(Icons.add, color: Colors.black54),
+            label: const Text('Tambah Item', style: TextStyle(color: Colors.black87)),
+            onPressed: _addItem,
+          ),
+          const Divider(height: 24),
+          Text('Total Items: $itemCount'),
+          Text('Total Bayar: ${fmt.format(totalAmt)}', style: const TextStyle(fontSize: 18)),
+          const SizedBox(height: 16),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(foregroundColor: Colors.white, backgroundColor: primaryBlue, padding: const EdgeInsets.symmetric(vertical: 16)),
+            onPressed: _submit,
+            child: const Text('Simpan', style: TextStyle(fontSize: 16)),
+          ),
+        ]),
+      ),
     );
   }
 }
 
-class _DetailItem {
+class _Item {
   DocumentReference? productRef;
-  int price;
-  int qty;
+  int qty = 1, price = 0;
+  int originalQty = 0; // 👈 added this
   final List<DocumentSnapshot> products;
-  final DocumentReference? docRef;
 
-  _DetailItem({this.productRef, this.price = 0, this.qty = 1, required this.products, this.docRef});
+  _Item({required this.products});
 
-  factory _DetailItem.fromMap(Map<String, dynamic> data, List<DocumentSnapshot> products, DocumentReference ref) {
-    return _DetailItem(
-      productRef: data['product_ref'],
-      price: data['price'],
-      qty: data['qty'],
-      products: products,
-      docRef: ref,
-    );
+  factory _Item.fromMap(Map<String, dynamic> data, List<DocumentSnapshot> products) {
+    final qty = data['qty'] ?? 1;
+    return _Item(products: products)
+      ..productRef = data['product_ref'] as DocumentReference?
+      ..qty = qty
+      ..originalQty = qty // 👈 store original delivery quantity
+      ..price = data['price'] ?? 0;
   }
 
-  int get subtotal => price * qty;
+  int get subtotal => qty * price;
 
-  Map<String, dynamic> toMap() {
-    return {
-      'product_ref': productRef,
-      'price': price,
-      'qty': qty,
-      'subtotal': subtotal,
-    };
-  }
+  Map<String, dynamic> toMap() => {
+        'product_ref': productRef,
+        'qty': qty,
+        'price': price,
+        'unit_name': 'pcs',
+        'subtotal': subtotal,
+      };
 }

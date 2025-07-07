@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:intl/intl.dart';
 
 class EditReceiptModal extends StatefulWidget {
   final DocumentReference receiptRef;
@@ -30,6 +31,12 @@ class _EditReceiptModalState extends State<EditReceiptModal> {
 
   final List<_DetailItem> _productDetails = [];
 
+  final Color pastelBlue = const Color(0xFFE3F2FD);
+  final Color primaryBlue = const Color(0xFF2196F3);
+
+  final dateFormatter = DateFormat('dd MMM yyyy', 'id_ID');
+  final currencyFormatter = NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
+
   int get itemTotal => _productDetails.fold(0, (sum, item) => sum + item.qty);
   int get grandTotal => _productDetails.fold(0, (sum, item) => sum + item.subtotal);
 
@@ -41,15 +48,11 @@ class _EditReceiptModalState extends State<EditReceiptModal> {
     _selectedWarehouse = widget.receiptData['warehouse_ref'];
 
     if (widget.receiptData['updated_at'] != null) {
-    _selectedDate = (widget.receiptData['updated_at'] as Timestamp).toDate();
-    _dateController.text = _formatDate(_selectedDate!);
-  }
+      _selectedDate = (widget.receiptData['updated_at'] as Timestamp).toDate();
+      _dateController.text = dateFormatter.format(_selectedDate!);
+    }
 
     _fetchDropdownData();
-  }
-  
-  String _formatDate(DateTime date) {
-    return "${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}";
   }
 
   Future<void> _fetchDropdownData() async {
@@ -58,9 +61,18 @@ class _EditReceiptModalState extends State<EditReceiptModal> {
     if (storeRefPath == null) return;
     final storeRef = FirebaseFirestore.instance.doc(storeRefPath);
 
-    final suppliers = await FirebaseFirestore.instance.collection('suppliers').where('customer_ref', isEqualTo: storeRef).get();
-    final warehouses = await FirebaseFirestore.instance.collection('warehouses').where('customer_ref', isEqualTo: storeRef).get();
-    final products = await FirebaseFirestore.instance.collection('products').where('customer_ref', isEqualTo: storeRef).get();
+    final suppliers = await FirebaseFirestore.instance
+        .collection('suppliers')
+        .where('customer_ref', isEqualTo: storeRef)
+        .get();
+    final warehouses = await FirebaseFirestore.instance
+        .collection('warehouses')
+        .where('customer_ref', isEqualTo: storeRef)
+        .get();
+    final products = await FirebaseFirestore.instance
+        .collection('products')
+        .where('customer_ref', isEqualTo: storeRef)
+        .get();
     final detailsSnapshot = await widget.receiptRef.collection('details').get();
 
     if (!mounted) return;
@@ -79,7 +91,7 @@ class _EditReceiptModalState extends State<EditReceiptModal> {
     if (!_formKey.currentState!.validate() ||
         _selectedSupplier == null ||
         _selectedWarehouse == null ||
-        _productDetails.isEmpty) {return;}
+        _productDetails.isEmpty) return;
 
     final detailsRef = widget.receiptRef.collection('details');
     final firestore = FirebaseFirestore.instance;
@@ -91,7 +103,7 @@ class _EditReceiptModalState extends State<EditReceiptModal> {
       final data = doc.data();
       final productRef = (data['product_ref'] as DocumentReference).id;
       final qty = (data['qty'] ?? 0);
-      oldQuantities[productRef] = (oldQuantities[productRef] ?? 0) + (qty as num).toInt();  
+      oldQuantities[productRef] = (oldQuantities[productRef] ?? 0) + (qty as num).toInt();
     }
 
     for (var doc in oldDetailsSnapshot.docs) {
@@ -136,7 +148,7 @@ class _EditReceiptModalState extends State<EditReceiptModal> {
           'qty': qtyDiff,
         });
       }
-      
+
       await firestore.runTransaction((transaction) async {
         final snapshot = await transaction.get(productDocRef);
         final currentQty = snapshot['qty'] ?? 0;
@@ -154,12 +166,10 @@ class _EditReceiptModalState extends State<EditReceiptModal> {
     });
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text("Receipt berhasil diedit.")),
+      const SnackBar(content: Text("Receipt berhasil diedit.")),
     );
 
-    if (mounted) {
-      Navigator.pop(context, 'updated');
-    }
+    if (mounted) Navigator.pop(context, 'updated');
   }
 
   void _removeProductRow(int index) {
@@ -173,118 +183,143 @@ class _EditReceiptModalState extends State<EditReceiptModal> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Edit Receipt')),
+      backgroundColor: pastelBlue,
+      appBar: AppBar(title: const Text('Edit Receipt')),
       body: _products.isEmpty
-          ? Center(child: CircularProgressIndicator())
+          ? const Center(child: CircularProgressIndicator())
           : Padding(
               padding: const EdgeInsets.all(16),
               child: Form(
                 key: _formKey,
-                child: ListView(
-                  children: [
-                    TextFormField(
-                      controller: _formNumberController,
-                      decoration: InputDecoration(labelText: 'No. Form'),
-                      validator: (value) => value!.isEmpty ? 'Wajib diisi' : null,
-                    ),
-                    DropdownButtonFormField<DocumentReference>(
-                      value: _selectedSupplier,
-                      items: _suppliers.map((doc) {
-                        return DropdownMenuItem(
-                          value: doc.reference,
-                          child: Text(doc['name']),
-                        );
-                      }).toList(),
-                      onChanged: (value) => setState(() => _selectedSupplier = value),
-                      decoration: InputDecoration(labelText: 'Supplier'),
-                      validator: (value) => value == null ? 'Pilih supplier' : null,
-                    ),
-                    DropdownButtonFormField<DocumentReference>(
-                      value: _selectedWarehouse,
-                      items: _warehouses.map((doc) {
-                        return DropdownMenuItem(
-                          value: doc.reference,
-                          child: Text(doc['name']),
-                        );
-                      }).toList(),
-                      onChanged: (value) => setState(() => _selectedWarehouse = value),
-                      decoration: InputDecoration(labelText: 'Warehouse'),
-                      validator: (value) => value == null ? 'Pilih warehouse' : null,
-                    ),
-                    SizedBox(height: 24),
-                    Text("Detail Produk", style: TextStyle(fontWeight: FontWeight.bold)),
-                    SizedBox(height: 8),
-                    ..._productDetails.asMap().entries.map((entry) {
-                      final index = entry.key;
-                      final item = entry.value;
-                      return Card(
-                        margin: EdgeInsets.symmetric(vertical: 8),
-                        child: Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: Column(
-                            children: [
-                              DropdownButtonFormField<DocumentReference>(
-                                value: item.productRef,
-                                items: _products.map((doc) {
-                                  return DropdownMenuItem(
-                                    value: doc.reference,
-                                    child: Text(doc['name']),
-                                  );
-                                }).toList(),
-                                onChanged: (value) => setState(() {
-                                  item.productRef = value;
-                                  item.unitName = value!.id == '1' ? 'pcs' : 'dus';
-                                }),
-                                decoration: InputDecoration(labelText: "Produk"),
-                                validator: (value) => value == null ? 'Pilih produk' : null,
-                              ),
-                              TextFormField(
-                                initialValue: item.price.toString(),
-                                decoration: InputDecoration(labelText: "Harga"),
-                                keyboardType: TextInputType.number,
-                                onChanged: (val) => setState(() {
-                                  item.price = int.tryParse(val) ?? 0;
-                                }),
-                                validator: (val) => val!.isEmpty ? 'Wajib diisi' : null,
-                              ),
-                              TextFormField(
-                                initialValue: item.qty.toString(),
-                                decoration: InputDecoration(labelText: "Jumlah"),
-                                keyboardType: TextInputType.number,
-                                onChanged: (val) => setState(() {
-                                  item.qty = int.tryParse(val) ?? 1;
-                                }),
-                                validator: (val) => val!.isEmpty ? 'Wajib diisi' : null,
-                              ),
-                              SizedBox(height: 8),
-                              Text("Satuan: ${item.unitName}"),
-                              Text("Subtotal: ${item.subtotal}"),
-                              SizedBox(height: 4),
-                              TextButton.icon(
-                                onPressed: () => _removeProductRow(index),
-                                icon: Icon(Icons.remove_circle, color: Colors.red),
-                                label: Text("Hapus Produk"),
-                              ),
-                            ],
-                          ),
-                        ),
+                child: ListView(children: [
+                  TextFormField(
+                    controller: _formNumberController,
+                    decoration: const InputDecoration(labelText: 'No. Form'),
+                    validator: (value) => value!.isEmpty ? 'Wajib diisi' : null,
+                    readOnly: true,
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<DocumentReference>(
+                    value: _selectedSupplier,
+                    icon: const SizedBox.shrink(),
+                    items: _suppliers.map((doc) => DropdownMenuItem(
+                      value: doc.reference,
+                      child: Text(doc['name']),
+                    )).toList(),
+                    onChanged: (v) => setState(() => _selectedSupplier = v),
+                    decoration: const InputDecoration(labelText: 'Supplier'),
+                    validator: (v) => v == null ? 'Pilih supplier' : null,
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<DocumentReference>(
+                    value: _selectedWarehouse,
+                    icon: const SizedBox.shrink(),
+                    items: _warehouses.map((doc) => DropdownMenuItem(
+                      value: doc.reference,
+                      child: Text(doc['name']),
+                    )).toList(),
+                    onChanged: (v) => setState(() => _selectedWarehouse = v),
+                    decoration: const InputDecoration(labelText: 'Warehouse'),
+                    validator: (v) => v == null ? 'Pilih warehouse' : null,
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _dateController,
+                    readOnly: true,
+                    decoration: const InputDecoration(labelText: 'Tanggal'),
+                    onTap: () async {
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: _selectedDate ?? DateTime.now(),
+                        firstDate: DateTime(2000),
+                        lastDate: DateTime(2100),
                       );
-                    }),
-                    ElevatedButton.icon(
-                      onPressed: _addProductRow,
-                      icon: Icon(Icons.add),
-                      label: Text('Tambah Produk'),
+                      if (picked != null) {
+                        setState(() {
+                          _selectedDate = picked;
+                          _dateController.text = dateFormatter.format(picked);
+                        });
+                      }
+                    },
+                    validator: (v) => v == null || v.isEmpty ? 'Pilih tanggal' : null,
+                  ),
+                  const SizedBox(height: 24),
+                  const Text('Detail Produk', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  const SizedBox(height: 8),
+                  ..._productDetails.asMap().entries.map((entry) {
+                    final index = entry.key;
+                    final item = entry.value;
+                    return Card(
+                      margin: const EdgeInsets.symmetric(vertical: 8),
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            DropdownButtonFormField<DocumentReference>(
+                              value: item.productRef,
+                              icon: const SizedBox.shrink(),
+                              items: _products.map((doc) {
+                                return DropdownMenuItem(
+                                  value: doc.reference,
+                                  child: Text(doc['name']),
+                                );
+                              }).toList(),
+                              onChanged: (v) {
+                                setState(() {
+                                  item.productRef = v;
+                                  item.unitName = 'pcs';
+                                });
+                              },
+                              decoration: const InputDecoration(labelText: 'Produk'),
+                              validator: (v) => v == null ? 'Pilih produk' : null,
+                            ),
+                            TextFormField(
+                              initialValue: item.price.toString(),
+                              decoration: const InputDecoration(labelText: 'Harga'),
+                              keyboardType: TextInputType.number,
+                              onChanged: (v) => setState(() => item.price = int.tryParse(v) ?? 0),
+                              validator: (v) => v!.isEmpty ? 'Wajib diisi' : null,
+                            ),
+                            TextFormField(
+                              initialValue: item.qty.toString(),
+                              decoration: const InputDecoration(labelText: 'Jumlah'),
+                              keyboardType: TextInputType.number,
+                              onChanged: (v) => setState(() => item.qty = int.tryParse(v) ?? 1),
+                              validator: (v) => v!.isEmpty ? 'Wajib diisi' : null,
+                            ),
+                            const SizedBox(height: 8),
+                            Text("Satuan: ${item.unitName}"),
+                            Text("Subtotal: ${currencyFormatter.format(item.subtotal)}"),
+                            TextButton.icon(
+                              onPressed: () => _removeProductRow(index),
+                              icon: const Icon(Icons.delete_forever_rounded, color: Colors.red),
+                              label: const Text("Hapus Produk", style: TextStyle(color: Colors.red)),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }),
+                  TextButton.icon(
+                    icon: const Icon(Icons.add),
+                    label: const Text('Tambah Produk'),
+                    onPressed: _addProductRow,
+                  ),
+                  const Divider(height: 32),
+                  Text("Item Total: $itemTotal"),
+                  Text("Grand Total: ${currencyFormatter.format(grandTotal)}"),
+                  const SizedBox(height: 24),
+                  ElevatedButton(
+                    onPressed: _updateReceipt,
+                    style: ElevatedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      backgroundColor: primaryBlue,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
                     ),
-                    SizedBox(height: 16),
-                    Text("Item Total: $itemTotal"),
-                    Text("Grand Total: $grandTotal"),
-                    SizedBox(height: 24),
-                    ElevatedButton(
-                      onPressed: _updateReceipt,
-                      child: Text('Update Receipt'),
-                    ),
-                  ],
-                ),
+                    child: const Text('Update Receipt'),
+                  ),
+                ]),
               ),
             ),
     );

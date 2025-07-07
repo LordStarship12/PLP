@@ -14,6 +14,9 @@ class _AddSalesmanPageState extends State<AddSalesmanPage> {
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _areaController = TextEditingController();
 
+  final Color pastelBlue = const Color(0xFFE3F2FD);
+  final Color primaryBlue = const Color(0xFF2196F3);
+
   Future<void> _saveSalesman() async {
     if (_formKey.currentState!.validate()) {
       final prefs = await SharedPreferences.getInstance();
@@ -21,7 +24,7 @@ class _AddSalesmanPageState extends State<AddSalesmanPage> {
 
       if (storeRefPath == null) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Customer reference not found.")),
+          const SnackBar(content: Text("Customer reference not found.")),
         );
         return;
       }
@@ -35,7 +38,7 @@ class _AddSalesmanPageState extends State<AddSalesmanPage> {
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Salesman berhasil ditambahkan.")),
+        const SnackBar(content: Text("Salesman berhasil ditambahkan.")),
       );
 
       if (mounted) Navigator.pop(context);
@@ -45,7 +48,8 @@ class _AddSalesmanPageState extends State<AddSalesmanPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text("Tambah Salesman")),
+      backgroundColor: pastelBlue,
+      appBar: AppBar(title: const Text("Tambah Salesman")),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Form(
@@ -54,19 +58,33 @@ class _AddSalesmanPageState extends State<AddSalesmanPage> {
             children: [
               TextFormField(
                 controller: _nameController,
-                decoration: InputDecoration(labelText: 'Nama Salesman'),
+                decoration: const InputDecoration(
+                  labelText: 'Nama Salesman',
+                  border: OutlineInputBorder(),
+                ),
                 validator: (value) => value!.isEmpty ? 'Wajib diisi' : null,
               ),
-              SizedBox(height: 24),
+              const SizedBox(height: 24),
               TextFormField(
                 controller: _areaController,
-                decoration: InputDecoration(labelText: 'Area Penjualan'),
+                decoration: const InputDecoration(
+                  labelText: 'Area Penjualan',
+                  border: OutlineInputBorder(),
+                ),
                 validator: (value) => value!.isEmpty ? 'Wajib diisi' : null,
               ),
-              SizedBox(height: 24),
-              ElevatedButton(
-                onPressed: _saveSalesman,
-                child: Text('Simpan Salesman'),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _saveSalesman,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: primaryBlue,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
+                  child: const Text('Simpan Salesman'),
+                ),
               ),
             ],
           ),

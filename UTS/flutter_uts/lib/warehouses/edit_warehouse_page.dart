@@ -18,6 +18,9 @@ class _EditWarehouseModalState extends State<EditWarehouseModal> {
   final TextEditingController _warehouseNameController = TextEditingController();
   bool _loading = true;
 
+  final Color pastelBlue = const Color(0xFFE3F2FD);
+  final Color primaryBlue = const Color(0xFF2196F3);
+
   @override
   void initState() {
     super.initState();
@@ -31,7 +34,7 @@ class _EditWarehouseModalState extends State<EditWarehouseModal> {
       _warehouseNameController.text = data?['name'] ?? '';
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to load warehouse data')),
+        const SnackBar(content: Text('Failed to load warehouse data')),
       );
     } finally {
       setState(() => _loading = false);
@@ -47,17 +50,16 @@ class _EditWarehouseModalState extends State<EditWarehouseModal> {
     });
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text("Warehouse berhasil diedit.")),
+      const SnackBar(content: Text("Warehouse berhasil diedit.")),
     );
 
-    if (mounted) {
-      Navigator.pop(context, 'updated');
-    }
+    if (mounted) Navigator.pop(context, 'updated');
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: pastelBlue,
       appBar: AppBar(title: const Text('Edit Warehouse')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -69,12 +71,20 @@ class _EditWarehouseModalState extends State<EditWarehouseModal> {
                   children: [
                     TextFormField(
                       controller: _warehouseNameController,
-                      decoration: const InputDecoration(labelText: 'Nama Warehouse'),
+                      decoration: const InputDecoration(
+                        labelText: 'Nama Warehouse',
+                        border: OutlineInputBorder(),
+                      ),
                       validator: (value) => value!.isEmpty ? 'Wajib diisi' : null,
                     ),
                     const SizedBox(height: 24),
                     ElevatedButton(
                       onPressed: _updateSupplier,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: primaryBlue,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                      ),
                       child: const Text('Update Warehouse'),
                     ),
                   ],

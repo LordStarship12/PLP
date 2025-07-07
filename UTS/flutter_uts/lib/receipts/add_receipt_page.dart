@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:intl/intl.dart';
 
 class AddReceiptPage extends StatefulWidget {
   const AddReceiptPage({super.key});
@@ -12,16 +13,22 @@ class AddReceiptPage extends StatefulWidget {
 class _AddReceiptPageState extends State<AddReceiptPage> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _formNumberController = TextEditingController();
-  DateTime? _selectedPostDate;
   final TextEditingController _postDateController = TextEditingController();
+  DateTime? _selectedPostDate;
 
   DocumentReference? _selectedSupplier;
   DocumentReference? _selectedWarehouse;
+
   List<DocumentSnapshot> _suppliers = [];
   List<DocumentSnapshot> _warehouses = [];
   List<DocumentSnapshot> _products = [];
 
   final List<_DetailItem> _productDetails = [];
+  bool _loading = true;
+
+  final pastelBlue = const Color(0xFFE3F2FD);
+  final primaryBlue = const Color(0xFF2196F3);
+  final currencyFormat = NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
 
   int get itemTotal => _productDetails.fold(0, (sum, item) => sum + item.qty);
   int get grandTotal => _productDetails.fold(0, (sum, item) => sum + item.subtotal);
@@ -35,20 +42,39 @@ class _AddReceiptPageState extends State<AddReceiptPage> {
   Future<void> _fetchDropdownData() async {
     final prefs = await SharedPreferences.getInstance();
     final storeRefPath = prefs.getString('customer_ref');
-    if (storeRefPath == null) return;
+    if (storeRefPath == null || storeRefPath.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Store reference tidak ditemukan.')),
+        );
+        Navigator.pop(context);
+      }
+      return;
+    }
+
     final storeRef = FirebaseFirestore.instance.doc(storeRefPath);
 
-    final suppliers = await FirebaseFirestore.instance.collection('suppliers').where('customer_ref', isEqualTo: storeRef).get();
-    final warehouses = await FirebaseFirestore.instance.collection('warehouses').where('customer_ref', isEqualTo: storeRef).get();
-    final products = await FirebaseFirestore.instance.collection('products').where('customer_ref', isEqualTo: storeRef).get();
+    final suppliers = await FirebaseFirestore.instance
+        .collection('suppliers')
+        .where('customer_ref', isEqualTo: storeRef)
+        .get();
+    final warehouses = await FirebaseFirestore.instance
+        .collection('warehouses')
+        .where('customer_ref', isEqualTo: storeRef)
+        .get();
+    final products = await FirebaseFirestore.instance
+        .collection('products')
+        .where('customer_ref', isEqualTo: storeRef)
+        .get();
 
-    final generatedFormNo = await _generateFormNumber(); 
+    final generatedFormNo = await _generateFormNumber();
 
     setState(() {
       _suppliers = suppliers.docs;
       _warehouses = warehouses.docs;
       _products = products.docs;
       _formNumberController.text = generatedFormNo;
+      _loading = false;
     });
   }
 
@@ -74,8 +100,8 @@ class _AddReceiptPageState extends State<AddReceiptPage> {
     if (!_formKey.currentState!.validate() ||
         _selectedSupplier == null ||
         _selectedWarehouse == null ||
-        _productDetails.isEmpty) {return;}
-        
+        _productDetails.isEmpty) return;
+
     final prefs = await SharedPreferences.getInstance();
     final storeRefPath = prefs.getString('customer_ref');
     if (storeRefPath == null) return;
@@ -96,7 +122,7 @@ class _AddReceiptPageState extends State<AddReceiptPage> {
 
     for (final item in _productDetails) {
       await receiptDoc.collection('details').add(item.toMap());
-    
+
       if (item.productRef != null) {
         final productSnap = await item.productRef!.get();
         final currentQty = productSnap['qty'] ?? 0;
@@ -104,13 +130,13 @@ class _AddReceiptPageState extends State<AddReceiptPage> {
           'qty': currentQty + item.qty,
         });
       }
-      
+
       final stockQuery = await FirebaseFirestore.instance
-        .collection('stocks')
-        .where('customer_ref', isEqualTo: storeRef)
-        .where('warehouse_ref', isEqualTo: _selectedWarehouse)
-        .where('product_ref', isEqualTo: item.productRef)
-        .get();
+          .collection('stocks')
+          .where('customer_ref', isEqualTo: storeRef)
+          .where('warehouse_ref', isEqualTo: _selectedWarehouse)
+          .where('product_ref', isEqualTo: item.productRef)
+          .get();
 
       if (stockQuery.docs.isNotEmpty) {
         final stockDoc = stockQuery.docs.first;
@@ -137,25 +163,11 @@ class _AddReceiptPageState extends State<AddReceiptPage> {
       }
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text("Receipt berhasil ditambah.")),
-    );
-
-
-    if (mounted) Navigator.pop(context);
+    if (mounted) Navigator.pop(context, 'saved');
   }
 
-  void _addProductRow() {
-    setState(() {
-      _productDetails.add(_DetailItem(products: _products));
-    });
-  }
-
-  void _removeProductRow(int index) {
-    setState(() {
-      _productDetails.removeAt(index);
-    });
-  }
+  void _addProductRow() => setState(() => _productDetails.add(_DetailItem(products: _products)));
+  void _removeProductRow(int index) => setState(() => _productDetails.removeAt(index));
 
   Future<void> _selectPostDate(BuildContext context) async {
     final picked = await showDatePicker(
@@ -168,7 +180,7 @@ class _AddReceiptPageState extends State<AddReceiptPage> {
     if (picked != null) {
       setState(() {
         _selectedPostDate = picked;
-        _postDateController.text = "${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}";
+        _postDateController.text = DateFormat('yyyy-MM-dd').format(picked);
       });
     }
   }
@@ -176,65 +188,71 @@ class _AddReceiptPageState extends State<AddReceiptPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Tambah Receipt')),
-      body: _products.isEmpty
-          ? Center(child: CircularProgressIndicator())
-          : Padding(
-              padding: const EdgeInsets.all(16),
-              child: Form(
-                key: _formKey,
-                child: ListView(
-                  children: [
-                    TextFormField(
-                      controller: _formNumberController,
-                      decoration: InputDecoration(labelText: 'No. Form'),
-                      readOnly: true,
-                    ),
-                    SizedBox(height: 16),
-                    DropdownButtonFormField<DocumentReference>(
-                      items: _suppliers.map((doc) {
-                        return DropdownMenuItem(
-                          value: doc.reference,
-                          child: Text(doc['name']),
-                        );
-                      }).toList(),
-                      onChanged: (value) => setState(() => _selectedSupplier = value),
-                      decoration: InputDecoration(labelText: "Supplier"),
-                      validator: (value) => value == null ? 'Pilih supplier' : null,
-                    ),
-                    DropdownButtonFormField<DocumentReference>(
-                      items: _warehouses.map((doc) {
-                        return DropdownMenuItem(
-                          value: doc.reference,
-                          child: Text(doc['name']),
-                        );
-                      }).toList(),
-                      onChanged: (value) => setState(() => _selectedWarehouse = value),
-                      decoration: InputDecoration(labelText: "Warehouse"),
-                      validator: (value) => value == null ? 'Pilih warehouse' : null,
-                    ),
-                    SizedBox(height: 24),
-                    TextFormField(
-                      controller: _postDateController,
-                      decoration: InputDecoration(labelText: 'Tanggal Post'),
-                      readOnly: true,
-                      onTap: () => _selectPostDate(context),
-                      validator: (value) => value == null || value.isEmpty ? 'Pilih tanggal' : null,
-                    ),
-                    SizedBox(height: 16),
-                    Text("Detail Produk", style: TextStyle(fontWeight: FontWeight.bold)),
-                    SizedBox(height: 8),
-                    ..._productDetails.asMap().entries.map((entry) {
-                      final index = entry.key;
-                      final item = entry.value;
-                      return Card(
-                        margin: EdgeInsets.symmetric(vertical: 8),
-                        child: Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: Column(
-                            children: [
+      backgroundColor: pastelBlue,
+      appBar: AppBar(title: const Text('Tambah Receipt')),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _products.isEmpty
+              ? const Center(child: Text('Tidak ada produk yang tersedia.'))
+              : Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Form(
+                    key: _formKey,
+                    child: ListView(children: [
+                      TextFormField(
+                        controller: _formNumberController,
+                        readOnly: true,
+                        decoration: const InputDecoration(labelText: 'No. Form'),
+                      ),
+                      const SizedBox(height: 16),
+                      DropdownButtonFormField<DocumentReference>(
+                        value: _selectedSupplier,
+                        icon: const SizedBox.shrink(),
+                        items: _suppliers.map((doc) {
+                          return DropdownMenuItem(
+                            value: doc.reference,
+                            child: Text(doc['name']),
+                          );
+                        }).toList(),
+                        onChanged: (value) => setState(() => _selectedSupplier = value),
+                        decoration: const InputDecoration(labelText: "Supplier"),
+                        validator: (value) => value == null ? 'Pilih supplier' : null,
+                      ),
+                      const SizedBox(height: 16),
+                      DropdownButtonFormField<DocumentReference>(
+                        value: _selectedWarehouse,
+                        icon: const SizedBox.shrink(),
+                        items: _warehouses.map((doc) {
+                          return DropdownMenuItem(
+                            value: doc.reference,
+                            child: Text(doc['name']),
+                          );
+                        }).toList(),
+                        onChanged: (value) => setState(() => _selectedWarehouse = value),
+                        decoration: const InputDecoration(labelText: "Warehouse"),
+                        validator: (value) => value == null ? 'Pilih warehouse' : null,
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: _postDateController,
+                        readOnly: true,
+                        onTap: () => _selectPostDate(context),
+                        decoration: const InputDecoration(labelText: 'Tanggal Post'),
+                        validator: (value) => value == null || value.isEmpty ? 'Pilih tanggal' : null,
+                      ),
+                      const SizedBox(height: 24),
+                      const Text("Detail Produk", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                      ..._productDetails.asMap().entries.map((entry) {
+                        final index = entry.key;
+                        final item = entry.value;
+                        return Card(
+                          margin: const EdgeInsets.symmetric(vertical: 6),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(children: [
                               DropdownButtonFormField<DocumentReference>(
                                 value: item.productRef,
+                                icon: const SizedBox.shrink(),
                                 items: _products.map((doc) {
                                   return DropdownMenuItem(
                                     value: doc.reference,
@@ -245,62 +263,64 @@ class _AddReceiptPageState extends State<AddReceiptPage> {
                                   setState(() {
                                     item.productRef = value;
                                     item.unitName = 'pcs';
-                                    item.unitController.text = item.unitName;
-                                    
-                                    final selectedProduct = _products.firstWhere((doc) => doc.reference == value);
-                                    final defaultPrice = selectedProduct['default_price'] ?? 0;
-                                    item.priceController.text = defaultPrice.toString();
+                                    item.unitController.text = 'pcs';
+                                    final prod = _products.firstWhere((d) => d.reference == value);
+                                    final price = prod['default_price'] ?? 0;
+                                    item.priceController.text = price.toString();
                                   });
                                 },
-                                decoration: InputDecoration(labelText: "Produk"),
+                                decoration: const InputDecoration(labelText: "Produk"),
                                 validator: (value) => value == null ? 'Pilih produk' : null,
                               ),
                               TextFormField(
                                 controller: item.priceController,
-                                decoration: InputDecoration(labelText: "Harga"),
+                                decoration: const InputDecoration(labelText: "Harga"),
                                 keyboardType: TextInputType.number,
-                                onChanged: (_) => setState(() {}), 
+                                onChanged: (_) => setState(() {}),
                                 validator: (val) => val!.isEmpty ? 'Wajib diisi' : null,
                               ),
                               TextFormField(
                                 initialValue: item.qty.toString(),
-                                decoration: InputDecoration(labelText: "Jumlah"),
+                                decoration: const InputDecoration(labelText: "Jumlah"),
                                 keyboardType: TextInputType.number,
                                 onChanged: (val) => setState(() {
                                   item.qty = int.tryParse(val) ?? 1;
                                 }),
                                 validator: (val) => val!.isEmpty ? 'Wajib diisi' : null,
                               ),
-                              SizedBox(height: 8),
-                              Text("Subtotal: ${item.subtotal}"),
-                              SizedBox(height: 4),
+                              const SizedBox(height: 8),
+                              Text("Subtotal: ${currencyFormat.format(item.subtotal)}"),
+                              const SizedBox(height: 8),
                               TextButton.icon(
                                 onPressed: () => _removeProductRow(index),
-                                icon: Icon(Icons.remove_circle, color: Colors.red),
-                                label: Text("Hapus Produk"),
+                                icon: const Icon(Icons.remove_circle, color: Colors.red),
+                                label: const Text("Hapus Produk", style: TextStyle(color: Colors.red)),
                               ),
-                            ],
+                            ]),
                           ),
+                        );
+                      }),
+                      TextButton.icon(
+                        onPressed: _addProductRow,
+                        icon: const Icon(Icons.add),
+                        label: const Text('Tambah Produk'),
+                      ),
+                      const Divider(height: 24),
+                      Text("Total Item: $itemTotal"),
+                      Text("Grand Total: ${currencyFormat.format(grandTotal)}", style: const TextStyle(fontSize: 18)),
+                      const SizedBox(height: 16),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          backgroundColor: primaryBlue,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
                         ),
-                      );
-                    }),
-                    ElevatedButton.icon(
-                      onPressed: _addProductRow,
-                      icon: Icon(Icons.add),
-                      label: Text('Tambah Produk'),
-                    ),
-                    SizedBox(height: 16),
-                    Text("Item Total: $itemTotal"),
-                    Text("Grand Total: $grandTotal"),
-                    SizedBox(height: 24),
-                    ElevatedButton(
-                      onPressed: _saveReceipt,
-                      child: Text('Simpan Receipt'),
-                    ),
-                  ],
+                        onPressed: _saveReceipt,
+                        child: const Text('Simpan Receipt', style: TextStyle(fontSize: 16)),
+                      ),
+                    ]),
+                  ),
                 ),
-              ),
-            ),
     );
   }
 }
@@ -310,7 +330,6 @@ class _DetailItem {
   int qty = 1;
   String unitName = 'unit';
   final List<DocumentSnapshot> products;
-
   TextEditingController priceController = TextEditingController();
   TextEditingController unitController = TextEditingController();
 
@@ -329,4 +348,3 @@ class _DetailItem {
     };
   }
 }
-

@@ -18,6 +18,9 @@ class _EditSupplierModalState extends State<EditSupplierModal> {
   final TextEditingController _supplierNameController = TextEditingController();
   bool _loading = true;
 
+  final Color pastelBlue = const Color(0xFFE3F2FD);
+  final Color primaryBlue = const Color(0xFF2196F3);
+
   @override
   void initState() {
     super.initState();
@@ -31,10 +34,10 @@ class _EditSupplierModalState extends State<EditSupplierModal> {
       _supplierNameController.text = data?['name'] ?? '';
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to load supplier data')),
+        const SnackBar(content: Text('Failed to load supplier data')),
       );
     } finally {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -46,6 +49,10 @@ class _EditSupplierModalState extends State<EditSupplierModal> {
       'updated_at': DateTime.now(),
     });
 
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("Supplier berhasil diedit.")),
+    );
+
     if (mounted) {
       Navigator.pop(context, 'updated');
     }
@@ -54,6 +61,7 @@ class _EditSupplierModalState extends State<EditSupplierModal> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: pastelBlue,
       appBar: AppBar(title: const Text('Edit Supplier')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -65,13 +73,24 @@ class _EditSupplierModalState extends State<EditSupplierModal> {
                   children: [
                     TextFormField(
                       controller: _supplierNameController,
-                      decoration: const InputDecoration(labelText: 'Nama Supplier'),
+                      decoration: const InputDecoration(
+                        labelText: 'Nama Supplier',
+                        border: OutlineInputBorder(),
+                      ),
                       validator: (value) => value!.isEmpty ? 'Wajib diisi' : null,
                     ),
                     const SizedBox(height: 24),
-                    ElevatedButton(
-                      onPressed: _updateSupplier,
-                      child: const Text('Update Supplier'),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: _updateSupplier,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: primaryBlue,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                        ),
+                        child: const Text('Update Supplier'),
+                      ),
                     ),
                   ],
                 ),

@@ -19,6 +19,9 @@ class _EditProductModalState extends State<EditProductModal> {
   final TextEditingController _priceController = TextEditingController();
   bool _loading = true;
 
+  final Color pastelBlue = const Color(0xFFE3F2FD);
+  final Color primaryBlue = const Color(0xFF2196F3);
+
   @override
   void initState() {
     super.initState();
@@ -33,7 +36,7 @@ class _EditProductModalState extends State<EditProductModal> {
       _priceController.text = (data?['default_price']?.toString() ?? '');
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to load product data')),
+        const SnackBar(content: Text('Failed to load product data')),
       );
     } finally {
       setState(() => _loading = false);
@@ -50,7 +53,7 @@ class _EditProductModalState extends State<EditProductModal> {
     });
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text("Product berhasil diedit.")),
+      const SnackBar(content: Text("Product berhasil diedit.")),
     );
 
     if (mounted) {
@@ -61,6 +64,7 @@ class _EditProductModalState extends State<EditProductModal> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: pastelBlue,
       appBar: AppBar(title: const Text('Edit Product')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -72,19 +76,34 @@ class _EditProductModalState extends State<EditProductModal> {
                   children: [
                     TextFormField(
                       controller: _productNameController,
-                      decoration: const InputDecoration(labelText: 'Nama Product'),
+                      decoration: const InputDecoration(
+                        labelText: 'Nama Produk',
+                        border: OutlineInputBorder(),
+                      ),
                       validator: (value) => value!.isEmpty ? 'Wajib diisi' : null,
                     ),
                     const SizedBox(height: 24),
                     TextFormField(
                       controller: _priceController,
-                      decoration: const InputDecoration(labelText: 'Default Price'),
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Harga Default',
+                        border: OutlineInputBorder(),
+                      ),
                       validator: (value) => value!.isEmpty ? 'Wajib diisi' : null,
                     ),
                     const SizedBox(height: 24),
-                    ElevatedButton(
-                      onPressed: _updateProduct,
-                      child: const Text('Update Product'),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: _updateProduct,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: primaryBlue,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                        ),
+                        child: const Text('Update Produk'),
+                      ),
                     ),
                   ],
                 ),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:bcrypt/bcrypt.dart';
 
 class EditCustomerModal extends StatefulWidget {
@@ -18,90 +19,144 @@ class _EditCustomerModalState extends State<EditCustomerModal> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
+  final TextEditingController _storeNameController = TextEditingController();
+
+  bool _isAdmin = false;
   bool _loading = true;
+
+  final Color pastelBlue = const Color(0xFFE3F2FD);
+  final Color primaryBlue = const Color(0xFF2196F3);
 
   @override
   void initState() {
     super.initState();
-    _loadCustomerData();
+    _loadInitialData();
   }
 
-  Future<void> _loadCustomerData() async {
-    try {
-      final doc = await widget.customerRef.get();
-      final data = doc.data() as Map<String, dynamic>?;
-      _usernameController.text = data?['username'] ?? '';
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Gagal memuat data customer.')),
-      );
-    } finally {
-      setState(() => _loading = false);
-    }
+  Future<void> _loadInitialData() async {
+    final prefs = await SharedPreferences.getInstance();
+    final refPath = prefs.getString('customer_ref');
+    _isAdmin = refPath == 'customers/admin';
+
+    final doc = await widget.customerRef.get();
+    final data = doc.data() as Map<String, dynamic>;
+
+    _usernameController.text = data['username'] ?? '';
+    _storeNameController.text = data['name'] ?? '';
+    _loading = false;
+
+    if (mounted) setState(() {});
   }
 
-  Future<void> _updateCustomer() async {
+  Future<void> _saveChanges() async {
     if (!_formKey.currentState!.validate()) return;
 
-    final newUsername = _usernameController.text.trim();
-    final newPassword = _passwordController.text.trim();
-
-    final updateData = {
-      'username': newUsername,
-      'updated_at': DateTime.now(),
+    final updates = {
+      'name': _storeNameController.text.trim(),
     };
 
-    // Only hash and update password if it's not empty
-    if (newPassword.isNotEmpty) {
-      updateData['password'] = BCrypt.hashpw(newPassword, BCrypt.gensalt());
+    if (_isAdmin) {
+      final newUsername = _usernameController.text.trim();
+      final query = await FirebaseFirestore.instance
+          .collection('customers')
+          .where('username', isEqualTo: newUsername)
+          .limit(1)
+          .get();
+
+      final isSameDoc = query.docs.isNotEmpty &&
+          query.docs.first.reference.path == widget.customerRef.path;
+
+      if (query.docs.isNotEmpty && !isSameDoc) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Username sudah dipakai.")),
+        );
+        return;
+      }
+
+      updates['username'] = newUsername;
+
+      final newPassword = _passwordController.text.trim();
+      if (newPassword.isNotEmpty) {
+        updates['password'] = BCrypt.hashpw(newPassword, BCrypt.gensalt());
+      }
     }
 
-    await widget.customerRef.update(updateData);
+    await widget.customerRef.update(updates);
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Customer berhasil diedit.")),
-    );
-
-    if (mounted) {
-      Navigator.pop(context, 'updated');
-    }
+    if (mounted) Navigator.pop(context, 'updated');
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Edit Customer')),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : Padding(
-              padding: const EdgeInsets.all(16),
-              child: Form(
-                key: _formKey,
-                child: ListView(
+    return _loading
+        ? const Center(child: CircularProgressIndicator())
+        : Container(
+            color: pastelBlue,
+            padding: EdgeInsets.only(
+              left: 16,
+              right: 16,
+              top: 24,
+              bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+            ),
+            child: Form(
+              key: _formKey,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    TextFormField(
-                      controller: _usernameController,
-                      decoration: const InputDecoration(labelText: 'Username'),
-                      validator: (value) =>
-                          value == null || value.trim().isEmpty ? 'Wajib diisi' : null,
+                    Text(
+                      'Edit Customer',
+                      style: Theme.of(context).textTheme.titleLarge,
                     ),
                     const SizedBox(height: 24),
-                    TextFormField(
-                      controller: _passwordController,
-                      obscureText: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Password (kosongkan jika tidak ingin diubah)',
+                    if (_isAdmin) ...[
+                      TextFormField(
+                        controller: _usernameController,
+                        decoration: const InputDecoration(
+                          labelText: 'Username',
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (value) =>
+                            value!.isEmpty ? 'Wajib diisi' : null,
                       ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: _passwordController,
+                        obscureText: true,
+                        decoration: const InputDecoration(
+                          labelText:
+                              'Password (kosongkan jika tidak diganti)',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                    TextFormField(
+                      controller: _storeNameController,
+                      decoration: const InputDecoration(
+                        labelText: 'Nama Toko',
+                        border: OutlineInputBorder(),
+                      ),
+                      validator: (value) =>
+                          value!.isEmpty ? 'Wajib diisi' : null,
                     ),
                     const SizedBox(height: 24),
-                    ElevatedButton(
-                      onPressed: _updateCustomer,
-                      child: const Text('Update Customer'),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: _saveChanges,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: primaryBlue,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                        ),
+                        child: const Text('Simpan Perubahan'),
+                      ),
                     ),
                   ],
                 ),
               ),
             ),
-    );
+          );
   }
 }
