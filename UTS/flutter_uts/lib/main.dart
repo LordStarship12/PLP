@@ -403,109 +403,79 @@ class ReceiptListPage extends StatefulWidget {
 }
 
 class _ReceiptListPageState extends State<ReceiptListPage> {
-  List<DocumentSnapshot> _receipts = [];
+  List<DocumentSnapshot> _allReceipts = [];
   bool _loading = true;
-
-  DocumentReference? _selectedSupplier;
-  DocumentReference? _selectedWarehouse;
-  DocumentReference? _selectedProduct;
-
-  List<DocumentSnapshot> _suppliers = [];
-  List<DocumentSnapshot> _warehouses = [];
-  List<DocumentSnapshot> _products = [];
+  final NumberFormat rupiahFormat = NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
 
   final Color pastelBlue = const Color(0xFFE3F2FD);
   final Color pastelBlueDark = const Color(0xFF90CAF9);
   final Color textDark = const Color(0xFF333333);
-  final _fmt = NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
 
   @override
   void initState() {
     super.initState();
-    _loadFilters();
-    _loadReceipts();
+    _loadReceiptsForStore();
   }
 
-  Future<void> _loadFilters() async {
+  Future<void> _loadReceiptsForStore() async {
     final prefs = await SharedPreferences.getInstance();
-    final refPath = prefs.getString('customer_ref');
-    if (refPath == null) return;
-    final storeRef = FirebaseFirestore.instance.doc(refPath);
+    final storeRefPath = prefs.getString('customer_ref');
+    if (storeRefPath == null || storeRefPath.isEmpty) return;
 
-    final s = await FirebaseFirestore.instance
-        .collection('suppliers')
-        .where('customer_ref', isEqualTo: storeRef)
-        .get();
-
-    final w = await FirebaseFirestore.instance
-        .collection('warehouses')
-        .where('customer_ref', isEqualTo: storeRef)
-        .get();
-
-    final p = await FirebaseFirestore.instance
-        .collection('products')
-        .where('customer_ref', isEqualTo: storeRef)
-        .get();
-
-    setState(() {
-      _suppliers = s.docs;
-      _warehouses = w.docs;
-      _products = p.docs;
-    });
-  }
-
-  Future<void> _loadReceipts() async {
-    setState(() => _loading = true);
-    final prefs = await SharedPreferences.getInstance();
-    final refPath = prefs.getString('customer_ref');
-    if (refPath == null) return;
-    final storeRef = FirebaseFirestore.instance.doc(refPath);
-
-    var query = FirebaseFirestore.instance
+    final storeRef = FirebaseFirestore.instance.doc(storeRefPath);
+    final receiptsSnapshot = await FirebaseFirestore.instance
         .collection('purchaseGoodsReceipts')
-        .where('customer_ref', isEqualTo: storeRef);
-
-    if (_selectedSupplier != null) {
-      query = query.where('supplier_ref', isEqualTo: _selectedSupplier);
-    }
-    if (_selectedWarehouse != null) {
-      query = query.where('warehouse_ref', isEqualTo: _selectedWarehouse);
-    }
-
-    final snap = await query.get();
-    final docs = snap.docs;
-
-    List<DocumentSnapshot> filtered = docs;
-    if (_selectedProduct != null) {
-      filtered = [];
-      for (final doc in docs) {
-        final details = await doc.reference.collection('details').get();
-        final match = details.docs.any((d) => d['product_ref'] == _selectedProduct);
-        if (match) filtered.add(doc);
-      }
-    }
+        .where('customer_ref', isEqualTo: storeRef)
+        .get();
 
     setState(() {
-      _receipts = filtered;
+      _allReceipts = receiptsSnapshot.docs;
       _loading = false;
     });
   }
 
-  DataColumn centeredColumn(String label, {double width = 120}) {
+  Future<List<String>> _resolveReferences(
+    DocumentReference? supplierRef,
+    DocumentReference? warehouseRef,
+  ) async {
+    final refs = [supplierRef, warehouseRef];
+    final names = await Future.wait(refs.map((ref) async {
+      if (ref == null) return 'Unknown';
+      try {
+        final doc = await ref.get();
+        final data = doc.data() as Map<String, dynamic>?;
+        return data?['name']?.toString() ?? 'Unnamed';
+      } catch (e) {
+        return 'Error';
+      }
+    }).cast<Future<String>>());
+
+    return names;
+  }
+
+  Future<String> _resolveProductName(DocumentReference? ref) async {
+    if (ref == null) return 'Unknown';
+    try {
+      final doc = await ref.get();
+      final data = doc.data() as Map<String, dynamic>?;
+      return data?['name'] ?? 'Unnamed';
+    } catch (e) {
+      return 'Error';
+    }
+  }
+
+  DataColumn centeredColumn(String label, {double width = 180}) {
     return DataColumn(
       label: SizedBox(
         width: width,
         child: Center(
-          child: Text(
-            label,
-            style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
-          ),
+          child: Text(label, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
         ),
       ),
     );
   }
 
-  DataCell centeredCell(Widget child, {double width = 120}) {
+  DataCell centeredCell(Widget child, {double width = 180}) {
     return DataCell(
       SizedBox(
         width: width,
@@ -516,217 +486,220 @@ class _ReceiptListPageState extends State<ReceiptListPage> {
     );
   }
 
-  Widget buildDropdown({
-    required String label,
-    required List<DocumentSnapshot> items,
-    required DocumentReference? selected,
-    required void Function(DocumentReference?) onChanged,
-  }) {
-    return DropdownButton<DocumentReference>(
-      value: selected,
-      onChanged: (val) {
-        onChanged(val);
-        _loadReceipts();
-      },
-      dropdownColor: Colors.white,
-      hint: Text('Pilih $label'),
-      items: [
-        const DropdownMenuItem<DocumentReference>(
-          value: null,
-          child: Text('- Semua -'),
-        ),
-        ...items.map((doc) => DropdownMenuItem(
-              value: doc.reference,
-              child: Text((doc.data() as Map)['name'] ?? ''),
-            )),
-      ],
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: pastelBlue,
-      body: Column(
-        children: [
-          Container(
-            alignment: Alignment.centerRight,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: pastelBlueDark.withOpacity(0.2),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Wrap(
-                spacing: 12,
-                runSpacing: 8,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  buildDropdown(
-                    label: 'Supplier',
-                    items: _suppliers,
-                    selected: _selectedSupplier,
-                    onChanged: (v) => setState(() => _selectedSupplier = v),
-                  ),
-                  buildDropdown(
-                    label: 'Warehouse',
-                    items: _warehouses,
-                    selected: _selectedWarehouse,
-                    onChanged: (v) => setState(() => _selectedWarehouse = v),
-                  ),
-                  buildDropdown(
-                    label: 'Produk',
-                    items: _products,
-                    selected: _selectedProduct,
-                    onChanged: (v) => setState(() => _selectedProduct = v),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          Expanded(
-            child: _loading
-                ? const Center(child: CircularProgressIndicator())
-                : _receipts.isEmpty
-                    ? const Center(child: Text('Belum ada faktur pembelian'))
-                    : SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.all(16),
-                        child: DataTable(
-                          headingRowColor: WidgetStateProperty.all(pastelBlueDark),
-                          dataRowColor: WidgetStateProperty.resolveWith<Color?>((states) {
-                            return states.contains(WidgetState.selected)
-                                ? pastelBlueDark.withOpacity(0.4)
-                                : Colors.white;
-                          }),
-                          columns: [
-                            centeredColumn('No. Faktur'),
-                            centeredColumn('Tanggal'),
-                            centeredColumn('Supplier'),
-                            centeredColumn('Warehouse'),
-                            centeredColumn('Total'),
-                            centeredColumn('Items'),
-                            centeredColumn('Aksi', width: 240),
-                          ],
-                          rows: _receipts.map((doc) {
-                            final d = doc.data() as Map<String, dynamic>;
-                            final date = DateTime.tryParse(d['post_date'] ?? '') ??
-                                (d['created_at'] as Timestamp).toDate();
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _allReceipts.isEmpty
+              ? const Center(child: Text('Tidak ada receipt'))
+              : SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.all(16),
+                  child: DataTable(
+                    headingRowColor: WidgetStateProperty.all(pastelBlueDark),
+                    dataRowColor: WidgetStateProperty.resolveWith<Color?>(
+                      (states) => states.contains(WidgetState.selected)
+                          ? pastelBlueDark.withOpacity(0.4)
+                          : Colors.white,
+                    ),
+                    columns: [
+                      centeredColumn('Form'),
+                      centeredColumn('Tanggal'),
+                      centeredColumn('Total'),
+                      centeredColumn('Items'),
+                      centeredColumn('Supplier'),
+                      centeredColumn('Warehouse'),
+                      centeredColumn('Detail'),
+                      centeredColumn('Aksi'),
+                    ],
+                    rows: _allReceipts.map((doc) {
+                      final data = doc.data() as Map<String, dynamic>;
+                      final postDate = DateTime.tryParse(data['post_date'] ?? '') ??
+                          (data['created_at'] as Timestamp).toDate();
+                      final namesFuture = _resolveReferences(
+                        data['supplier_ref'],
+                        data['warehouse_ref'],
+                      );
 
-                            return DataRow(cells: [
-                              centeredCell(Text(d['no_faktur'] ?? '-')),
-                              centeredCell(Text(DateFormat('yyyy-MM-dd').format(date))),
-                              centeredCell(FutureBuilder<DocumentSnapshot>(
-                                future: (d['supplier_ref'] as DocumentReference).get(),
-                                builder: (c, s) => Text(
-                                  s.hasData ? (s.data!.data() as Map)['name'] ?? '-' : '-',
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              )),
-                              centeredCell(FutureBuilder<DocumentSnapshot>(
-                                future: (d['warehouse_ref'] as DocumentReference).get(),
-                                builder: (c, s) => Text(
-                                  s.hasData ? (s.data!.data() as Map)['name'] ?? '-' : '-',
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              )),
-                              centeredCell(Text(_fmt.format(d['grandtotal'] ?? 0))),
-                              centeredCell(Text('${d['item_total'] ?? 0}')),
-                              centeredCell(Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  IconButton(
-                                    icon: const Icon(Icons.edit, color: Colors.orange),
-                                    tooltip: 'Edit',
-                                    onPressed: () async {
-                                      final result = await Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (_) => EditReceiptModal(
-                                            receiptRef: doc.reference,
-                                            receiptData: d,
-                                          ),
-                                        ),
-                                      );
-                                      if (result == 'updated') {
-                                        await _loadReceipts();
-                                      }
-                                    },
+                      return DataRow(cells: [
+                        centeredCell(Text(data['no_form'] ?? '-')),
+                        centeredCell(Text(DateFormat('yyyy-MM-dd').format(postDate))),
+                        centeredCell(Text(rupiahFormat.format(data['grandtotal'] ?? 0))),
+                        centeredCell(Text('${data['item_total'] ?? 0}')),
+
+                        for (int i = 0; i < 2; i++)
+                          centeredCell(
+                            FutureBuilder<List<String>>(
+                              future: namesFuture,
+                              builder: (ctx, snap) {
+                                final name = snap.data != null ? snap.data![i] : '-';
+                                return Tooltip(
+                                  message: name,
+                                  child: Text(
+                                    name,
+                                    overflow: TextOverflow.ellipsis,
+                                    maxLines: 1,
                                   ),
-                                  IconButton(
-                                    icon: const Icon(Icons.delete, color: Colors.red),
-                                    tooltip: 'Hapus',
-                                    onPressed: () async {
-                                      final confirmed = await showDialog<bool>(
-                                        context: context,
-                                        builder: (context) => AlertDialog(
-                                          title: const Text('Hapus Receipt?'),
-                                          content: const Text('Apakah Anda yakin ingin menghapus receipt ini?'),
-                                          actions: [
-                                            TextButton(
-                                              onPressed: () => Navigator.pop(context, false),
-                                              child: const Text('Batal'),
-                                            ),
-                                            TextButton(
-                                              onPressed: () => Navigator.pop(context, true),
-                                              child: const Text('Hapus'),
-                                            ),
-                                          ],
-                                        ),
-                                      );
+                                );
+                              },
+                            ),
+                          ),
 
-                                      if (confirmed == true) {
-                                        final detailsSnapshot = await doc.reference.collection('details').get();
-                                        for (final detailDoc in detailsSnapshot.docs) {
-                                          final data = detailDoc.data();
-                                          final qty = data['qty'];
-                                          final productRef = data['product_ref'] as DocumentReference?;
-                                          final warehouseRef = d['warehouse_ref'];
-                                          if (productRef != null && warehouseRef != null && qty != null) {
-                                            final stockQuery = await FirebaseFirestore.instance
-                                                .collection('stocks')
-                                                .where('product_ref', isEqualTo: productRef)
-                                                .where('warehouse_ref', isEqualTo: warehouseRef)
-                                                .limit(1)
-                                                .get();
-                                            if (stockQuery.docs.isNotEmpty) {
-                                              final stockDoc = stockQuery.docs.first;
-                                              await stockDoc.reference.update({
-                                                'qty': (stockDoc['qty'] ?? 0) - qty,
-                                              });
-                                            }
+                        centeredCell(
+                          ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: pastelBlueDark,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            ),
+                            icon: const Icon(Icons.info_outline),
+                            label: const Text("Detail"),
+                            onPressed: () async {
+                              final detailSnapshot = await doc.reference.collection('details').get();
+                              final detailDocs = detailSnapshot.docs;
 
-                                            await FirebaseFirestore.instance.runTransaction((tx) async {
-                                              final prodSnap = await tx.get(productRef);
-                                              final currentQty = (prodSnap.data() as Map)['qty'] ?? 0;
-                                              tx.update(productRef, {'qty': currentQty - qty});
-                                            });
-                                          }
-                                          await detailDoc.reference.delete();
-                                        }
-
-                                        await doc.reference.delete();
-                                        await _loadReceipts();
-                                      }
-                                    },
+                              showDialog(
+                                context: context,
+                                builder: (context) => Dialog(
+                                  insetPadding: const EdgeInsets.all(24),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(16),
+                                    child: SingleChildScrollView(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: detailDocs.map((doc) {
+                                          final detail = doc.data();
+                                          return FutureBuilder<String>(
+                                            future: _resolveProductName(detail['product_ref']),
+                                            builder: (context, snapshot) {
+                                              final productName = snapshot.data ?? 'Loading...';
+                                              return Card(
+                                                margin: const EdgeInsets.symmetric(vertical: 6),
+                                                child: Padding(
+                                                  padding: const EdgeInsets.all(12),
+                                                  child: Column(
+                                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                                    children: [
+                                                      Text(productName, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                                      Text("Qty: ${detail['qty']} ${detail['unit_name']}"),
+                                                      Text("Harga: ${rupiahFormat.format(detail['price'])}"),
+                                                      Text("Subtotal: ${rupiahFormat.format(detail['subtotal'])}"),
+                                                    ],
+                                                  ),
+                                                ),
+                                              );
+                                            },
+                                          );
+                                        }).toList(),
+                                      ),
+                                    ),
                                   ),
-                                ],
-                              )),
-                            ]);
-                          }).toList(),
+                                ),
+                              );
+                            },
+                          ),
                         ),
-                      ),
-          ),
-        ],
-      ),
+
+                        centeredCell(Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.edit, color: Colors.orange),
+                              tooltip: 'Edit Receipt',
+                              onPressed: () async {
+                                final result = await showModalBottomSheet(
+                                  context: context,
+                                  isScrollControlled: true,
+                                  builder: (_) => EditReceiptModal(
+                                    receiptRef: doc.reference,
+                                    receiptData: data,
+                                  ),
+                                );
+                                if (result == 'updated') {
+                                  await _loadReceiptsForStore();
+                                }
+                              },
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete, color: Colors.red),
+                              tooltip: 'Hapus Receipt',
+                              onPressed: () async {
+                                final confirmed = await showDialog<bool>(
+                                  context: context,
+                                  builder: (context) => AlertDialog(
+                                    title: const Text('Hapus Receipt?'),
+                                    content: const Text('Apakah Anda yakin ingin menghapus receipt ini?'),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.pop(context, false),
+                                        child: const Text('Batal'),
+                                      ),
+                                      TextButton(
+                                        onPressed: () => Navigator.pop(context, true),
+                                        child: const Text('Hapus'),
+                                      ),
+                                    ],
+                                  ),
+                                );
+
+                                if (confirmed != true) return;
+
+                                final detailsSnapshot = await doc.reference.collection('details').get();
+                                for (final detailDoc in detailsSnapshot.docs) {
+                                  final detailData = detailDoc.data();
+                                  final productRef = detailData['product_ref'];
+                                  final warehouseRef = detailData['warehouse_ref'] ?? data['warehouse_ref'];
+                                  final qty = detailData['qty'];
+
+                                  if (productRef != null && warehouseRef != null && qty != null) {
+                                    final stockQuery = await FirebaseFirestore.instance
+                                        .collection('stocks')
+                                        .where('product_ref', isEqualTo: productRef)
+                                        .where('warehouse_ref', isEqualTo: warehouseRef)
+                                        .limit(1)
+                                        .get();
+
+                                    if (stockQuery.docs.isNotEmpty) {
+                                      final stockDoc = stockQuery.docs.first;
+                                      final newQty = (stockDoc['qty'] ?? 0) - qty;
+                                      if (newQty <= 0) {
+                                        await stockDoc.reference.delete();
+                                      } else {
+                                        await stockDoc.reference.update({'qty': newQty});
+                                      }
+                                    }
+
+                                    final productSnap = await productRef.get();
+                                    if (productSnap.exists) {
+                                      final currentQty = (productSnap.data() as Map)['qty'] ?? 0;
+                                      await productRef.update({'qty': currentQty - qty});
+                                    }
+
+                                    await detailDoc.reference.delete();
+                                  }
+                                }
+
+                                await doc.reference.delete();
+                                await _loadReceiptsForStore();
+                              },
+                            ),
+                          ],
+                        )),
+                      ]);
+                    }).toList(),
+                  ),
+                ),
       floatingActionButton: FloatingActionButton(
         onPressed: () async {
           await Navigator.push(
             context,
             MaterialPageRoute(builder: (_) => const AddReceiptPage()),
           );
-          await _loadReceipts();
+          await _loadReceiptsForStore();
         },
         backgroundColor: pastelBlueDark,
         child: const Icon(Icons.add, size: 32),
@@ -735,7 +708,6 @@ class _ReceiptListPageState extends State<ReceiptListPage> {
   }
 }
   
-
 class DeliveryListPage extends StatefulWidget {
   const DeliveryListPage({super.key});
 
@@ -744,374 +716,269 @@ class DeliveryListPage extends StatefulWidget {
 }
 
 class _DeliveryListPageState extends State<DeliveryListPage> {
-  List<DocumentSnapshot> _invoices = [];
+  List<DocumentSnapshot> _allDeliveries = [];
   bool _loading = true;
-  final _fmt = NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
+  final NumberFormat rupiahFormat = NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
 
   final Color pastelBlue = const Color(0xFFE3F2FD);
   final Color pastelBlueDark = const Color(0xFF90CAF9);
   final Color textDark = const Color(0xFF333333);
 
-  DocumentReference? _selectedCustomer;
-  DocumentReference? _selectedWarehouse;
-  DocumentReference? _selectedProduct;
-
-  List<DocumentSnapshot> _customers = [];
-  List<DocumentSnapshot> _warehouses = [];
-  List<DocumentSnapshot> _products = [];
-
   @override
   void initState() {
     super.initState();
-    _loadFilters();
-    _loadInvoices();
+    _loadDeliveriesForStore();
   }
 
-  Future<void> _loadFilters() async {
+  Future<void> _loadDeliveriesForStore() async {
     final prefs = await SharedPreferences.getInstance();
-    final refPath = prefs.getString('customer_ref');
-    if (refPath == null) return;
-    final storeRef = FirebaseFirestore.instance.doc(refPath);
+    final storeRefPath = prefs.getString('customer_ref');
+    if (storeRefPath == null || storeRefPath.isEmpty) return;
 
-    final custs = await FirebaseFirestore.instance
-        .collection('customers')
-        .where('customer_ref', isEqualTo: storeRef)
-        .get();
-
-    final whs = await FirebaseFirestore.instance
-        .collection('warehouses')
-        .where('customer_ref', isEqualTo: storeRef)
-        .get();
-
-    final prods = await FirebaseFirestore.instance
-        .collection('products')
-        .where('customer_ref', isEqualTo: storeRef)
-        .get();
-
-    setState(() {
-      _customers = custs.docs;
-      _warehouses = whs.docs;
-      _products = prods.docs;
-    });
-  }
-
-  Future<void> _loadInvoices() async {
-    setState(() => _loading = true);
-    final prefs = await SharedPreferences.getInstance();
-    final refPath = prefs.getString('customer_ref');
-    if (refPath == null) return;
-    final storeRef = FirebaseFirestore.instance.doc(refPath);
-
-    var query = FirebaseFirestore.instance
+    final storeRef = FirebaseFirestore.instance.doc(storeRefPath);
+    final deliveriesSnapshot = await FirebaseFirestore.instance
         .collection('deliveries')
-        .where('customer_ref', isEqualTo: storeRef);
-
-    if (_selectedCustomer != null) {
-      query = query.where('customer_store_ref', isEqualTo: _selectedCustomer);
-    }
-    if (_selectedWarehouse != null) {
-      query = query.where('warehouse_ref', isEqualTo: _selectedWarehouse);
-    }
-
-    final snap = await query.get();
-    final docs = snap.docs;
-
-    List<DocumentSnapshot> filtered = docs;
-    if (_selectedProduct != null) {
-      filtered = [];
-      for (final doc in docs) {
-        final detailsSnap = await doc.reference.collection('details').get();
-        final hasProduct = detailsSnap.docs.any(
-          (d) => d['product_ref'] == _selectedProduct,
-        );
-        if (hasProduct) filtered.add(doc);
-      }
-    }
+        .where('customer_ref', isEqualTo: storeRef)
+        .get();
 
     setState(() {
-      _invoices = filtered;
+      _allDeliveries = deliveriesSnapshot.docs;
       _loading = false;
     });
   }
 
-  Future<List<String>> _fetchNames(Map<String, dynamic> data) async {
-    Future<String> getName(DocumentReference? r) async {
-      if (r == null) return '-';
-      final d = await r.get();
-      return (d.data() as Map)['name'] ?? '-';
-    }
+  Future<List<String>> _resolveReferences(
+    DocumentReference? customerStoreRef,
+    DocumentReference? warehouseRef,
+    DocumentReference? salesmanRef,
+  ) async {
+    final refs = [customerStoreRef, warehouseRef, salesmanRef];
+    final names = await Future.wait(refs.map((ref) async {
+      if (ref == null) return 'Unknown';
+      try {
+        final doc = await ref.get();
+        final data = doc.data() as Map<String, dynamic>?;
+        return data?['name']?.toString() ?? 'Unnamed';
+      } catch (e) {
+        return 'Error';
+      }
+    }).cast<Future<String>>());
 
-    return Future.wait([
-      getName(data['customer_store_ref']),
-      getName(data['warehouse_ref']),
-      getName(data['salesman_ref']),
-    ]);
+    return names;
   }
 
-  DataColumn centeredColumn(String label, {double width = 120}) {
+  DataColumn centeredColumn(String label, {double width = 160}) {
     return DataColumn(
       label: SizedBox(
         width: width,
         child: Center(
-          child: Text(
-            label,
-            style: const TextStyle(
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
-          ),
+          child: Text(label, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
         ),
       ),
     );
   }
 
-  DataCell centeredCell(Widget child, {double width = 120}) {
+  DataCell centeredCell(Widget child, {double width = 160}) {
     return DataCell(
       SizedBox(
         width: width,
         child: Center(
-          child: DefaultTextStyle(
-            style: TextStyle(color: textDark),
-            child: child,
-          ),
+          child: DefaultTextStyle(style: TextStyle(color: textDark), child: child),
         ),
       ),
     );
   }
 
-  Widget buildDropdown({
-    required String label,
-    required List<DocumentSnapshot> items,
-    required DocumentReference? selected,
-    required void Function(DocumentReference?) onChanged,
-  }) {
-    return DropdownButton<DocumentReference>(
-      value: selected,
-      onChanged: (val) {
-        onChanged(val);
-        _loadInvoices();
-      },
-      dropdownColor: Colors.white,
-      hint: Text('Pilih $label'),
-      items: [
-        const DropdownMenuItem<DocumentReference>(
-          value: null,
-          child: Text('- Semua -'),
-        ),
-        ...items.map((doc) => DropdownMenuItem(
-              value: doc.reference,
-              child: Text((doc.data() as Map)['name'] ?? ''),
-            ))
-      ],
-    );
+  Future<String> _resolveProductName(DocumentReference? ref) async {
+    if (ref == null) return 'Unknown';
+    try {
+      final doc = await ref.get();
+      final data = doc.data() as Map<String, dynamic>?;
+      return data?['name'] ?? 'Unnamed';
+    } catch (e) {
+      return 'Error';
+    }
   }
 
   @override
-  Widget build(BuildContext ctx) {
+  Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: pastelBlue,
-      body: Column(
-        children: [
-          Container(
-            alignment: Alignment.centerRight,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: pastelBlueDark.withOpacity(0.2),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Wrap(
-                spacing: 12,
-                runSpacing: 8,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  buildDropdown(
-                    label: 'Customer',
-                    items: _customers,
-                    selected: _selectedCustomer,
-                    onChanged: (v) => setState(() => _selectedCustomer = v),
-                  ),
-                  buildDropdown(
-                    label: 'Warehouse',
-                    items: _warehouses,
-                    selected: _selectedWarehouse,
-                    onChanged: (v) => setState(() => _selectedWarehouse = v),
-                  ),
-                  buildDropdown(
-                    label: 'Produk',
-                    items: _products,
-                    selected: _selectedProduct,
-                    onChanged: (v) => setState(() => _selectedProduct = v),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          Expanded(
-            child: _loading
-                ? const Center(child: CircularProgressIndicator())
-                : _invoices.isEmpty
-                    ? const Center(child: Text('Belum ada faktur'))
-                    : SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.all(16),
-                        child: DataTable(
-                          headingRowColor: WidgetStateProperty.all(pastelBlueDark),
-                          dataRowColor: WidgetStateProperty.resolveWith<Color?>((states) {
-                            return states.contains(WidgetState.selected)
-                                ? pastelBlueDark.withOpacity(0.4)
-                                : Colors.white;
-                          }),
-                          columns: [
-                            centeredColumn('Faktur'),
-                            centeredColumn('Tanggal'),
-                            centeredColumn('Total'),
-                            centeredColumn('Items'),
-                            centeredColumn('Customer'),
-                            centeredColumn('Warehouse'),
-                            centeredColumn('Salesman'),
-                            centeredColumn('Aksi'),
-                          ],
-                          rows: _invoices.map((doc) {
-                            final d = doc.data() as Map<String, dynamic>;
-                            final date = DateTime.tryParse(d['post_date'] ?? '') ??
-                                (d['created_at'] as Timestamp).toDate();
-                            final namesFuture = _fetchNames(d);
-
-                            return DataRow(cells: [
-                              centeredCell(Text(d['no_faktur'] ?? '-')),
-                              centeredCell(Text(DateFormat('yyyy-MM-dd').format(date))),
-                              centeredCell(Text(_fmt.format(d['grandtotal'] ?? 0))),
-                              centeredCell(Text('${d['item_total'] ?? 0}')),
-                              for (int i = 0; i < 3; i++)
-                                centeredCell(FutureBuilder<List<String>>(
-                                  future: namesFuture,
-                                  builder: (c, s) => Text(
-                                    s.data != null ? s.data![i] : '-',
-                                    overflow: TextOverflow.ellipsis,
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _allDeliveries.isEmpty
+              ? const Center(child: Text('Tidak ada delivery'))
+              : SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.all(16),
+                  child: DataTable(
+                    headingRowColor: WidgetStateProperty.all(pastelBlueDark),
+                    dataRowColor: WidgetStateProperty.resolveWith<Color?>(
+                      (states) => states.contains(WidgetState.selected)
+                          ? pastelBlueDark.withOpacity(0.4)
+                          : Colors.white,
+                    ),
+                    columns: [
+                      centeredColumn('No. Faktur'),
+                      centeredColumn('Tanggal'),
+                      centeredColumn('Total'),
+                      centeredColumn('Items'),
+                      centeredColumn('Customer'),
+                      centeredColumn('Warehouse'),
+                      centeredColumn('Salesman'),
+                      centeredColumn('Detail'),  // <-- added column
+                      centeredColumn('Aksi'),
+                    ],
+                    rows: _allDeliveries.map((doc) {
+                      final data = doc.data() as Map<String, dynamic>;
+                      final postDate = DateTime.tryParse(data['post_date'] ?? '') ??
+                          (data['created_at'] as Timestamp).toDate();
+                      final refsFut = _resolveReferences(
+                        data['customer_store_ref'],
+                        data['warehouse_ref'],
+                        data['salesman_ref'],
+                      );
+                      return DataRow(cells: [
+                        centeredCell(Text(data['no_faktur'] ?? '-')),
+                        centeredCell(Text(DateFormat('yyyy-MM-dd').format(postDate))),
+                        centeredCell(Text(rupiahFormat.format(data['grandtotal'] ?? 0))),
+                        centeredCell(Text('${data['item_total'] ?? 0}')),
+                        for (int i = 0; i < 3; i++)
+                          centeredCell(
+                            FutureBuilder<List<String>>(
+                              future: refsFut,
+                              builder: (ctx, snap) {
+                                final txt = (snap.data != null ? snap.data![i] : '-');
+                                return Tooltip(
+                                  message: txt,
+                                  child: Text(txt, overflow: TextOverflow.ellipsis, maxLines: 1),
+                                );
+                              },
+                            ),
+                          ),
+                        // **DETAIL BUTTON** re-added here:
+                        centeredCell(
+                          ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: pastelBlueDark,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            ),
+                            icon: const Icon(Icons.info_outline),
+                            label: const Text("Detail"),
+                            onPressed: () async {
+                              final detailSnapshot = await doc.reference.collection('details').get();
+                              final detailDocs = detailSnapshot.docs;
+                              showDialog(
+                                context: context,
+                                builder: (context) => Dialog(
+                                  insetPadding: const EdgeInsets.all(24),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(16),
+                                    child: SingleChildScrollView(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: detailDocs.map((dd) {
+                                          final detail = dd.data();
+                                          return FutureBuilder<String>(
+                                            future: _resolveProductName(detail['product_ref']),
+                                            builder: (context, snapP) {
+                                              final pname = snapP.data ?? 'Loading...';
+                                              return Card(
+                                                margin: const EdgeInsets.symmetric(vertical: 6),
+                                                child: Padding(
+                                                  padding: const EdgeInsets.all(12),
+                                                  child: Column(
+                                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                                    children: [
+                                                      Text(pname, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                                      Text("Qty: ${detail['qty']}"),
+                                                      Text("Harga: ${rupiahFormat.format(detail['price'])}"),
+                                                      Text("Subtotal: ${rupiahFormat.format(detail['subtotal'])}"),
+                                                    ],
+                                                  ),
+                                                ),
+                                              );
+                                            },
+                                          );
+                                        }).toList(),
+                                      ),
+                                    ),
                                   ),
-                                )),
-                              centeredCell(Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  IconButton(
-                                    icon: const Icon(Icons.print, color: Colors.blue),
-                                    tooltip: 'Print Faktur',
-                                    onPressed: () async {
-                                      final details = await doc.reference.collection('details').get();
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (_) => POSInvoicePDFPreview(
-                                            invoiceData: d,
-                                            detailDocs: details.docs,
-                                          ),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                  IconButton(
-                                    icon: const Icon(Icons.edit, color: Colors.orange),
-                                    tooltip: 'Edit Faktur',
-                                    onPressed: () async {
-                                      final result = await Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (_) => EditDeliveryModal(
-                                            invoiceRef: doc.reference,
-                                            invoiceData: d,
-                                          ),
-                                        ),
-                                      );
-                                      if (result == 'updated') {
-                                        await _loadInvoices();
-                                      }
-                                    },
-                                  ),
-                                  IconButton(
-                                    icon: const Icon(Icons.delete, color: Colors.red),
-                                    tooltip: 'Hapus Faktur',
-                                    onPressed: () async {
-                                      final confirmed = await showDialog<bool>(
-                                        context: context,
-                                        builder: (context) => AlertDialog(
-                                          title: const Text('Hapus Sales Invoice?'),
-                                          content: const Text('Apakah Anda yakin ingin menghapus sales invoice ini?'),
-                                          actions: [
-                                            TextButton(
-                                              onPressed: () => Navigator.pop(context, false),
-                                              child: const Text('Batal'),
-                                            ),
-                                            TextButton(
-                                              onPressed: () => Navigator.pop(context, true),
-                                              child: const Text('Hapus'),
-                                            ),
-                                          ],
-                                        ),
-                                      );
-
-                                      if (confirmed == true) {
-                                        final detailsSnapshot = await doc.reference.collection('details').get();
-                                        for (var detailDoc in detailsSnapshot.docs) {
-                                          final detailData = detailDoc.data();
-                                          final productRef = detailData['product_ref'] as DocumentReference?;
-                                          final warehouseRef = d['warehouse_ref'];
-                                          final qty = detailData['qty'];
-                                          if (productRef != null && warehouseRef != null && qty != null) {
-                                            final stockQuery = await FirebaseFirestore.instance
-                                                .collection('stocks')
-                                                .where('product_ref', isEqualTo: productRef)
-                                                .where('warehouse_ref', isEqualTo: warehouseRef)
-                                                .limit(1)
-                                                .get();
-
-                                            if (stockQuery.docs.isNotEmpty) {
-                                              final stockDoc = stockQuery.docs.first;
-                                              final stockRef = stockDoc.reference;
-                                              final stockData = stockDoc.data();
-                                              final stockQty = stockData['qty'] ?? 0;
-                                              await stockRef.update({'qty': stockQty + qty});
-                                            } else {
-                                              await FirebaseFirestore.instance.collection('stocks').add({
-                                                'product_ref': productRef,
-                                                'warehouse_ref': warehouseRef,
-                                                'qty': qty,
-                                              });
-                                            }
-
-                                            await FirebaseFirestore.instance.runTransaction((transaction) async {
-                                              final productSnap = await transaction.get(productRef);
-                                              final productData = productSnap.data() as Map<String, dynamic>?;
-                                              final currentQty = productData?['qty'] ?? 0;
-                                              transaction.update(productRef, {'qty': currentQty + qty});
-                                            });
-                                          }
-
-                                          await detailDoc.reference.delete();
-                                        }
-
-                                        await doc.reference.delete();
-                                        await _loadInvoices();
-                                      }
-                                    },
-                                  ),
-                                ],
-                              )),
-                            ]);
-                          }).toList(),
+                                ),
+                              );
+                            },
+                          ),
                         ),
-                      ),
-          ),
-        ],
-      ),
+                        centeredCell(Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.print, color: Colors.blue),
+                              tooltip: 'Print Faktur',
+                              onPressed: () async {
+                                final details = await doc.reference.collection('details').get();
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => POSInvoicePDFPreview(
+                                      invoiceData: data,
+                                      detailDocs: details.docs,
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.edit, color: Colors.orange),
+                              onPressed: () async {
+                                final result = await showModalBottomSheet(
+                                  context: context,
+                                  isScrollControlled: true,
+                                  builder: (_) => EditDeliveryModal(
+                                    invoiceRef: doc.reference,
+                                    invoiceData: data,
+                                  ),
+                                );
+                                if (result == 'updated') {
+                                  await _loadDeliveriesForStore();
+                                }
+                              },
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete, color: Colors.red),
+                              onPressed: () async {
+                                final confirmed = await showDialog<bool>(
+                                  context: context,
+                                  builder: (_) => AlertDialog(
+                                    title: const Text('Hapus Delivery?'),
+                                    content: const Text('Apakah Anda yakin ingin menghapus delivery ini?'),
+                                    actions: [
+                                      TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Batal')),
+                                      TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Hapus')),
+                                    ],
+                                  ),
+                                );
+                                if (confirmed != true) return;
+                                await doc.reference.collection('details').get().then((snap) {
+                                  for (var dd in snap.docs) dd.reference.delete();
+                                });
+                                await doc.reference.delete();
+                                await _loadDeliveriesForStore();
+                              },
+                            ),
+                          ],
+                        )),
+                      ]);
+                    }).toList(),
+                  ),
+                ),
       floatingActionButton: FloatingActionButton(
         onPressed: () async {
-          await Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const AddDeliveryPage()),
-          );
-          await _loadInvoices();
+          await Navigator.push(context, MaterialPageRoute(builder: (_) => AddDeliveryPage()));
+          await _loadDeliveriesForStore();
         },
         backgroundColor: pastelBlueDark,
         child: const Icon(Icons.add, size: 32),
